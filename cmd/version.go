@@ -37,9 +37,12 @@ var versionCmd = &cobra.Command{
 	Short: "Print version and build information",
 	Long: `Print detailed version and build information for Budget-Assist.
 This includes version number, build time, commit hash, and build environment.
-Use --json flag to get the output in JSON format for programmatic use.`,
+Use --json flag to get the output in JSON format for programmatic use.
+Use --short flag to only display the version number.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		jsonOutput, _ := cmd.Flags().GetBool("json")
+		shortOutput, _ := cmd.Flags().GetBool("short")
+
 		info := VersionInfo{
 			Version:    Version,
 			CommitHash: CommitHash,
@@ -48,6 +51,11 @@ Use --json flag to get the output in JSON format for programmatic use.`,
 			GoVersion:  runtime.Version(),
 			OS:         runtime.GOOS,
 			Arch:       runtime.GOARCH,
+		}
+
+		if shortOutput {
+			fmt.Println(info.Version)
+			return
 		}
 
 		if jsonOutput {
@@ -74,4 +82,5 @@ Use --json flag to get the output in JSON format for programmatic use.`,
 func init() {
 	rootCmd.AddCommand(versionCmd)
 	versionCmd.Flags().Bool("json", false, "Output version information in JSON format")
+	versionCmd.Flags().Bool("short", false, "Only display the version number")
 }

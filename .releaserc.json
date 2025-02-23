@@ -2,7 +2,7 @@
   "branches": ["main"],
   "plugins": [
     ["@semantic-release/commit-analyzer", {
-      "preset": "angular",
+      "preset": "conventionalcommits",
       "releaseRules": [
         {"type": "docs", "release": "patch"},
         {"type": "chore", "release": "patch"},
@@ -27,14 +27,21 @@
         ]
       },
       "writerOpts": {
-        "commitsSort": ["subject", "scope"],
-        "headerPartial": "{{#if scope}}**{{scope}}:** {{/if}}{{subject}}",
-        "commitPartial": "* {{> header}}{{#if hash}} {{#if @root.linkReferences~}}\n  ([{{shortHash}}]({{commitUrlFormat}})){{else}}{{shortHash}}{{/if}}{{/if}}\n{{#if body}}\n  {{body}}\n{{/if}}\n{{#if footer}}\n  {{footer}}\n{{/if}}\n",
-        "mainTemplate": "{{> header}}\n\n{{#if commitGroups.length}}\n{{#each commitGroups}}\n### {{title}}\n\n{{#each commits}}\n{{> commit}}\n{{/each}}\n{{/each}}\n{{/if}}\n\n{{> footer}}"
+        "groupBy": "type",
+        "commitGroupsSort": "title",
+        "commitsSort": ["scope", "subject"],
+        "noteGroupsSort": "title",
+        "notesSort": true,
+        "generateOn": "commit",
+        "debug": true,
+        "finalizeContext": {
+          "commitPartial": "* {{#if scope}}**{{scope}}:** {{/if}}{{subject}} ([{{shortHash}}]({{@root.host}}/{{@root.owner}}/{{@root.repository}}/commit/{{hash}})){{#if body}}\n\n  {{body}}{{/if}}{{#if footer}}\n\n  {{footer}}{{/if}}\n"
+        }
       }
     }],
     ["@semantic-release/changelog", {
-      "changelogTitle": "# Budget-Assist Changelog"
+      "changelogTitle": "# Budget-Assist Changelog",
+      "changelogFile": "CHANGELOG.md"
     }],
     "@semantic-release/github",
     ["@semantic-release/git", {
