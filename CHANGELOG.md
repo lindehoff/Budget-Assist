@@ -1,5 +1,30 @@
 # Budget-Assist Changelog
 
+## 1.6.0 (2025-02-23)
+
+* ✨ feat(cicd): enhance CI/CD pipeline and code quality - Configure CI workflow with Go 1.24.0, set up linting with golangci-lint and ESLint, configure test running with race detection, add multi-platform build process ([](https://github.com/lindehoff/Budget-Assist/commit/f9f1a3590054f3fa0ccb8bbf9324c27f6b2bbafb))
+* Merge pull request #16 from lindehoff/feat/enhance-cicd-pipeline ([](https://github.com/lindehoff/Budget-Assist/commit/1497a5a320f46e5e58c018ed758d397859bf38ff))
+  Feat/enhance cicd pipeline
+* configure codecov token for coverage uploads ([](https://github.com/lindehoff/Budget-Assist/commit/4aeb7fa3f8af326d7ab3ae80e864ab528a6b6f65))
+  - Add CODECOV_TOKEN secret configuration to codecov-action
+- Enable authenticated coverage report uploads
+- Fix rate limiting issues with Codecov uploads
+
+Note: Requires CODECOV_TOKEN to be configured in repository secrets
+* **ci:** 🚀 enhance CI/CD pipeline and code quality ([](https://github.com/lindehoff/Budget-Assist/commit/7b4a84a1e4f905aee0090fc5af31fbb84e2c1671))
+  * 🔧 Add CI workflow with Go and Node.js setup\n* 🔍 Configure golangci-lint with custom rules\n* ✨ Set up ESLint for TypeScript/JavaScript\n* 🧪 Add test running with race detection and coverage reporting\n* 📦 Implement multi-platform build process with checksums\n* 🏷️ Configure semantic release with automated versioning\n* ⬆️ Update Go version to 1.24.0\n* 🗃️ Optimize struct field alignment in database models\n* 🛡️ Add comprehensive error handling\n* 📝 Update iteration 1 tasks documentation\n* 🙈 Update .gitignore for better file management
+* **ci:** 🚀 enhance CI/CD pipeline and code quality ([](https://github.com/lindehoff/Budget-Assist/commit/7d635f432badac9a6d5995551af499fdc7edee08))
+  * 🔧 Add CI workflow with Go and Node.js setup\n* 🔍 Configure golangci-lint with custom rules\n* ✨ Set up ESLint for TypeScript/JavaScript\n* 🧪 Add test running with race detection and coverage reporting\n* 📦 Implement multi-platform build process with checksums\n* 🏷️ Configure semantic release with automated versioning\n* ⬆️ Update Go version to 1.24.0\n* 🗃️ Optimize struct field alignment in database models\n* 🛡️ Add comprehensive error handling\n* 📝 Update iteration 1 tasks documentation
+* **web:** initialize TypeScript and React setup ([](https://github.com/lindehoff/Budget-Assist/commit/f8bbe56003743320d4abc85d1ee97eb1f83af66a))
+  - Add basic TypeScript configuration and types
+- Create initial React component structure
+- Configure ESLint for TypeScript
+* **db:** add foreign key constraints and currency validation ([](https://github.com/lindehoff/Budget-Assist/commit/226cbfc7c3c702aac86171ec89124c2c7a5adfcc))
+  - Add explicit foreign key constraints to CategoryType, Transaction and Budget models
+- Implement BeforeCreate hook for Transaction to validate currency
+- Add coverage.txt to gitignore to prevent tracking test coverage files
+- Fix seed test by adding missing SeedPredefinedCategories call
+
 ## <small>1.5.1 (2025-02-23)</small>
 
 * Merge pull request #12 from lindehoff/chore/fix-semantic-release-config ([](https://github.com/lindehoff/Budget-Assist/commit/99d9a3637c68a720d48dbbc7438b87ad22a8641d))
