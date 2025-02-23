@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/lindehoff/Budget-Assist/compare/v1.0.0...v1.1.0) (2025-02-23)
+
+
+### Features
+
+* **db:** implement core database layer with tests 🎉 ([98babe9](https://github.com/lindehoff/Budget-Assist/commit/98babe9461cd86447c832209f68b5c516b925e69))
+
 # 1.0.0 (2025-02-23)
 
 
