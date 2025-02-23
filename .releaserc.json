@@ -14,6 +14,10 @@
     }],
     ["@semantic-release/release-notes-generator", {
       "preset": "angular",
+      "writerOpts": {
+        "commitsSort": ["subject", "scope"],
+        "includeDetails": true
+      },
       "presetConfig": {
         "types": [
           {"type": "feat", "section": "Features"},
@@ -27,7 +31,9 @@
         ]
       }
     }],
-    "@semantic-release/changelog",
+    ["@semantic-release/changelog", {
+      "changelogTitle": "# Budget-Assist Changelog"
+    }],
     "@semantic-release/github",
     ["@semantic-release/git", {
       "assets": ["CHANGELOG.md", "package.json"],
