@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -38,10 +39,17 @@ var versionCmd = &cobra.Command{
 	Long: `Print detailed version and build information for Budget-Assist.
 This includes version number, build time, commit hash, and build environment.
 Use --json flag to get the output in JSON format for programmatic use.
-Use --short flag to only display the version number.`,
+Use --short flag to only display the version number.
+Use --quiet flag to suppress error output (useful for scripts).`,
 	Run: func(cmd *cobra.Command, args []string) {
 		jsonOutput, _ := cmd.Flags().GetBool("json")
 		shortOutput, _ := cmd.Flags().GetBool("short")
+		quietOutput, _ := cmd.Flags().GetBool("quiet")
+
+		// If quiet is enabled, redirect stderr to /dev/null
+		if quietOutput {
+			os.Stderr = nil
+		}
 
 		info := VersionInfo{
 			Version:    Version,
@@ -61,8 +69,10 @@ Use --short flag to only display the version number.`,
 		if jsonOutput {
 			jsonData, err := json.MarshalIndent(info, "", "  ")
 			if err != nil {
-				fmt.Printf("Error generating JSON output: %v\n", err)
-				return
+				if !quietOutput {
+					fmt.Fprintf(os.Stderr, "Error generating JSON output: %v\n", err)
+				}
+				os.Exit(1)
 			}
 			fmt.Println(string(jsonData))
 			return
@@ -83,4 +93,5 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	versionCmd.Flags().Bool("json", false, "Output version information in JSON format")
 	versionCmd.Flags().Bool("short", false, "Only display the version number")
+	versionCmd.Flags().Bool("quiet", false, "Suppress error output")
 }
