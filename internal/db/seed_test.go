@@ -9,12 +9,11 @@ func Test_Successfully_seed_predefined_categories(t *testing.T) {
 	ctx, db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Execute seeding
+	// Seed the database with predefined categories
 	if err := SeedPredefinedCategories(ctx, db); err != nil {
 		t.Fatalf("failed to seed predefined categories: %v", err)
 	}
 
-	// Define test cases
 	testCases := []struct {
 		name          string
 		categoryType  string
@@ -55,7 +54,6 @@ func Test_Successfully_seed_predefined_categories(t *testing.T) {
 		},
 	}
 
-	// Run test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Verify category type
@@ -71,7 +69,7 @@ func Test_Successfully_seed_predefined_categories(t *testing.T) {
 			// Verify translation
 			var translations []Translation
 			result = db.WithContext(ctx).Where("entity_type = ? AND entity_id = ? AND language_code = ?",
-				EntityTypeCategoryType, categoryType.ID, tc.langCode).Find(&translations)
+				string(EntityTypeCategoryType), categoryType.ID, tc.langCode).Find(&translations)
 			if result.Error != nil {
 				t.Errorf("failed to find translations: %v", result.Error)
 			}

@@ -7,20 +7,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// CategoryTypeData represents the data structure for seeding category types
+// CategoryTypeData represents predefined category type data
 type CategoryTypeData struct {
-	Name          string
-	IsMultiple    bool
-	Description   string
 	Translations  map[string]string
+	Name          string
+	Description   string
+	IsMultiple    bool
 	Subcategories []SubcategoryData
 }
 
-// SubcategoryData represents the data structure for seeding subcategories
+// SubcategoryData represents predefined subcategory data
 type SubcategoryData struct {
+	Translations map[string]string
 	Name         string
 	Description  string
-	Translations map[string]string
 }
 
 // predefinedCategories contains all the predefined category types and their subcategories
@@ -367,7 +367,7 @@ func SeedPredefinedCategories(ctx context.Context, db *gorm.DB) error {
 				"translation", translation)
 
 			if err := db.WithContext(ctx).Create(&Translation{
-				EntityType:   EntityTypeCategoryType,
+				EntityType:   string(EntityTypeCategoryType),
 				EntityID:     categoryType.ID,
 				LanguageCode: lang,
 				Name:         translation,
@@ -427,7 +427,7 @@ func SeedPredefinedCategories(ctx context.Context, db *gorm.DB) error {
 					"translation", translation)
 
 				if err := db.WithContext(ctx).Create(&Translation{
-					EntityType:   EntityTypeSubcategory,
+					EntityType:   string(EntityTypeSubcategory),
 					EntityID:     subcategory.ID,
 					LanguageCode: lang,
 					Name:         translation,

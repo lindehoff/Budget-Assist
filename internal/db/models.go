@@ -1,7 +1,13 @@
+// Package db provides database models and operations.
+//
+// Note: The struct field alignment in this package is optimized for database schema
+// rather than memory usage. This is intentional as these models are primarily used
+// for database operations with GORM, and the schema design takes precedence over
+// memory optimization.
 package db
 
 import (
-	"database/sql"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,21 +24,27 @@ const (
 
 // Translation represents a localized name for an entity
 type Translation struct {
-	gorm.Model
-	EntityType   EntityType `gorm:"not null"`
-	EntityID     uint       `gorm:"not null"`
-	LanguageCode string     `gorm:"not null"`
-	Name         string     `gorm:"not null"`
+	ID           uint      `gorm:"primarykey"`
+	EntityID     uint      `gorm:"not null"`
+	CreatedAt    time.Time `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
+	Name         string    `gorm:"not null;size:100"`
+	Description  string    `gorm:"size:500"`
+	EntityType   string    `gorm:"not null;size:50"`
+	LanguageCode string    `gorm:"not null;size:5"`
 }
 
 // CategoryType represents different types of categories (e.g., VEHICLE, PROPERTY)
 type CategoryType struct {
-	gorm.Model
-	Name         string `gorm:"not null"`
-	IsMultiple   bool   `gorm:"default:false"`
-	Description  string
-	Categories   []Category    `gorm:"foreignKey:TypeID"`
-	Translations []Translation `gorm:"-"`
+	ID            uint          `gorm:"primarykey"`
+	CreatedAt     time.Time     `gorm:"not null"`
+	UpdatedAt     time.Time     `gorm:"not null"`
+	Name          string        `gorm:"not null;unique;size:100"`
+	Description   string        `gorm:"size:500"`
+	IsMultiple    bool          `gorm:"not null"`
+	Categories    []Category    `gorm:"foreignKey:TypeID"`
+	Subcategories []Subcategory `gorm:"foreignKey:CategoryTypeID"`
+	Translations  []Translation `gorm:"polymorphic:Entity;polymorphicValue:category_type"`
 }
 
 // GetTranslation returns the translated name for the specified language code
@@ -47,15 +59,17 @@ func (ct *CategoryType) GetTranslation(langCode string) string {
 
 // Category represents a specific instance of a category type
 type Category struct {
-	gorm.Model
-	TypeID             uint          `gorm:"not null"`
-	CategoryType       CategoryType  `gorm:"foreignKey:TypeID"`
-	Name               string        `gorm:"not null"`
-	InstanceIdentifier string        // e.g., "Vehicle: ABC123"
-	IsActive           bool          `gorm:"default:true"`
-	Subcategories      []Subcategory `gorm:"many2many:category_subcategories;"`
-	Transactions       []Transaction `gorm:"foreignKey:CategoryID"`
-	Translations       []Translation `gorm:"-"`
+	ID                 uint      `gorm:"primarykey"`
+	TypeID             uint      `gorm:"not null"`
+	CreatedAt          time.Time `gorm:"not null"`
+	UpdatedAt          time.Time `gorm:"not null"`
+	Name               string    `gorm:"not null;size:100"`
+	Description        string    `gorm:"size:500"`
+	InstanceIdentifier string    `gorm:"size:100"`
+	IsActive           bool      `gorm:"not null"`
+	Type               CategoryType
+	Transactions       []Transaction
+	Translations       []Translation `gorm:"polymorphic:Entity;polymorphicValue:category"`
 }
 
 // GetTranslation returns the translated name for the specified language code
@@ -70,15 +84,16 @@ func (c *Category) GetTranslation(langCode string) string {
 
 // Subcategory represents subcategories within a category type
 type Subcategory struct {
-	gorm.Model
-	CategoryTypeID uint         `gorm:"not null"`
-	CategoryType   CategoryType `gorm:"foreignKey:CategoryTypeID"`
-	Name           string       `gorm:"not null"`
-	Description    string
-	IsSystem       bool          `gorm:"default:true"`
-	Categories     []Category    `gorm:"many2many:category_subcategories;"`
-	Transactions   []Transaction `gorm:"foreignKey:SubcategoryID"`
-	Translations   []Translation `gorm:"-"`
+	ID             uint      `gorm:"primarykey"`
+	CategoryTypeID uint      `gorm:"not null"`
+	CreatedAt      time.Time `gorm:"not null"`
+	UpdatedAt      time.Time `gorm:"not null"`
+	Name           string    `gorm:"not null;size:100"`
+	Description    string    `gorm:"size:500"`
+	IsSystem       bool      `gorm:"not null"`
+	CategoryType   CategoryType
+	Transactions   []Transaction
+	Translations   []Translation `gorm:"polymorphic:Entity;polymorphicValue:subcategory"`
 }
 
 // GetTranslation returns the translated name for the specified language code
@@ -93,19 +108,29 @@ func (s *Subcategory) GetTranslation(langCode string) string {
 
 // Transaction represents a financial transaction
 type Transaction struct {
-	gorm.Model
-	Amount          float64   `gorm:"not null"`
-	Currency        string    `gorm:"not null;check:currency IN ('SEK', 'EUR', 'USD')"`
-	TransactionDate time.Time `gorm:"not null"`
-	Description     string
+	ID              uint `gorm:"primarykey"`
 	CategoryID      *uint
-	Category        *Category `gorm:"foreignKey:CategoryID"`
 	SubcategoryID   *uint
+	Amount          float64      `gorm:"not null"`
+	CreatedAt       time.Time    `gorm:"not null"`
+	UpdatedAt       time.Time    `gorm:"not null"`
+	TransactionDate time.Time    `gorm:"not null"`
+	Description     string       `gorm:"size:500"`
+	RawData         string       `gorm:"size:1000"`
+	AIAnalysis      string       `gorm:"size:1000"`
+	Currency        string       `gorm:"not null;size:3"`
+	Category        *Category    `gorm:"foreignKey:CategoryID"`
 	Subcategory     *Subcategory `gorm:"foreignKey:SubcategoryID"`
-	RawData         string       // Original import data
-	AIAnalysis      string       // AI-generated insights
-	UpdatedAt       sql.NullTime
-	Tags            []Tag `gorm:"many2many:transaction_tags;"`
+}
+
+// BeforeCreate hook to validate the currency
+func (t *Transaction) BeforeCreate(tx *gorm.DB) error {
+	switch t.Currency {
+	case CurrencySEK, CurrencyEUR, CurrencyUSD:
+		return nil
+	default:
+		return fmt.Errorf("invalid currency: %s", t.Currency)
+	}
 }
 
 // Tag represents a label that can be attached to transactions
@@ -118,16 +143,20 @@ type Tag struct {
 
 // Budget represents a budget plan for a specific category
 type Budget struct {
-	gorm.Model
-	CategoryID    uint     `gorm:"not null"`
-	Category      Category `gorm:"foreignKey:CategoryID"`
-	SubcategoryID *uint
-	Subcategory   *Subcategory `gorm:"foreignKey:SubcategoryID"`
-	Amount        float64      `gorm:"not null"`
-	Currency      string       `gorm:"not null;check:currency IN ('SEK', 'EUR', 'USD')"`
-	Period        string       // "monthly", "yearly", etc.
-	StartDate     time.Time
-	EndDate       time.Time
+	ID             uint `gorm:"primarykey"`
+	CategoryID     uint `gorm:"not null"`
+	SubcategoryID  *uint
+	Amount         float64      `gorm:"not null"`
+	CreatedAt      time.Time    `gorm:"not null"`
+	UpdatedAt      time.Time    `gorm:"not null"`
+	StartDate      time.Time    `gorm:"not null"`
+	EndDate        time.Time    `gorm:"not null"`
+	Description    string       `gorm:"size:500"`
+	RecurrenceRule string       `gorm:"size:100"`
+	Currency       string       `gorm:"not null;size:3"`
+	IsRecurring    bool         `gorm:"not null"`
+	Category       Category     `gorm:"foreignKey:CategoryID"`
+	Subcategory    *Subcategory `gorm:"foreignKey:SubcategoryID"`
 }
 
 // Report represents saved analysis reports
