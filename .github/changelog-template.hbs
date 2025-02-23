@@ -8,6 +8,7 @@
 
   As they won't be replaced when overriding the commitPartial
 --}}
+{{!-- Commit header --}}
 *{{#if scope}} **{{scope}}:**
 {{~/if}} {{#if subject}}
   {{~subject}}
@@ -37,12 +38,20 @@
     {{~this.repository}}{{this.prefix}}{{this.issue}}
   {{~/if}}{{/each}}
 {{~/if}}
-{{!-- End of copy --}}
 
-{{!-- Start of custom additions --}}
-{{#each bodyLines}}
+{{!-- Commit body --}}
+{{#if body}}
 
-  {{this}}
-{{/each}}{{#each notes}}
-  **BREAKING CHANGE**: {{text}}
+{{body}}
+{{/if}}
+
+{{!-- Commit footer --}}
+{{#each footerLines}}
+
+{{this}}
+{{/each}}
+
+{{!-- Breaking changes --}}
+{{#each notes}}
+**BREAKING CHANGE**: {{text}}
 {{/each}}
