@@ -41,7 +41,11 @@
           "commitGroupsSort": "title",
           "commitsSort": ["scope", "subject"],
           "noteGroupsSort": "title",
-          "commitPartial": "* {{#if scope}}**{{scope}}:** {{/if}}{{subject}} ([{{shortHash}}]({{@root.host}}/{{@root.owner}}/{{@root.repository}}/commit/{{hash}}))\n{{#if body}}\n  {{body}}\n{{/if}}\n{{#if footer}}\n  {{footer}}\n{{/if}}"
+          "commitPartial": "* {{#if scope}}**{{scope}}:** {{/if}}{{subject}} ([{{shortHash}}]({{@root.host}}/{{@root.owner}}/{{@root.repository}}/commit/{{hash}}))\n{{#if body}}\n  {{body}}\n{{/if}}\n{{#if footer}}\n  {{footer}}\n{{/if}}",
+          "transform": {
+            "hash": "shortHash",
+            "committerDate": false
+          }
         },
         "presetConfig": {
           "types": [
