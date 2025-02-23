@@ -13,11 +13,7 @@
       ]
     }],
     ["@semantic-release/release-notes-generator", {
-      "preset": "angular",
-      "writerOpts": {
-        "commitsSort": ["subject", "scope"],
-        "includeDetails": true
-      },
+      "preset": "conventionalcommits",
       "presetConfig": {
         "types": [
           {"type": "feat", "section": "Features"},
@@ -29,6 +25,12 @@
           {"type": "perf", "section": "Performance Improvements"},
           {"type": "test", "section": "Tests"}
         ]
+      },
+      "writerOpts": {
+        "commitsSort": ["subject", "scope"],
+        "headerPartial": "{{#if scope}}**{{scope}}:** {{/if}}{{subject}}",
+        "commitPartial": "* {{> header}}{{#if hash}} {{#if @root.linkReferences~}}\n  ([{{shortHash}}]({{commitUrlFormat}})){{else}}{{shortHash}}{{/if}}{{/if}}\n{{#if body}}\n  {{body}}\n{{/if}}\n{{#if footer}}\n  {{footer}}\n{{/if}}\n",
+        "mainTemplate": "{{> header}}\n\n{{#if commitGroups.length}}\n{{#each commitGroups}}\n### {{title}}\n\n{{#each commits}}\n{{> commit}}\n{{/each}}\n{{/each}}\n{{/if}}\n\n{{> footer}}"
       }
     }],
     ["@semantic-release/changelog", {
