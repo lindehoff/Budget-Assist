@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -9,6 +11,32 @@ import (
 
 	"gorm.io/gorm"
 )
+
+type testCase struct {
+	name               string
+	categoryType       CategoryType
+	category           Category
+	subcategory        Subcategory
+	transaction        Transaction
+	categoryTypeTransl Translation
+	categoryTransl     Translation
+	subcategoryTransl  Translation
+}
+
+func closeTestDB(db interface{}) error {
+	switch d := db.(type) {
+	case *gorm.DB:
+		sqlDB, err := d.DB()
+		if err != nil {
+			return err
+		}
+		return sqlDB.Close()
+	case *sql.DB:
+		return d.Close()
+	default:
+		return fmt.Errorf("unsupported database type: %T", db)
+	}
+}
 
 func setupTestDB(t *testing.T) (context.Context, *gorm.DB, func()) {
 	// Create test context with logger
@@ -33,27 +61,128 @@ func setupTestDB(t *testing.T) (context.Context, *gorm.DB, func()) {
 	}
 
 	cleanup := func() {
-		Close(db)
+		if err := closeTestDB(db); err != nil {
+			t.Errorf("failed to close database: %v", err)
+		}
 		os.RemoveAll(tempDir)
 	}
 
 	return ctx, db, cleanup
 }
 
+func createAndValidateEntities(t *testing.T, ctx context.Context, db *gorm.DB, tc *testCase) {
+	// Create CategoryType
+	result := db.WithContext(ctx).Create(&tc.categoryType)
+	if result.Error != nil {
+		t.Fatalf("failed to create category type: %v", result.Error)
+	}
+	if tc.categoryType.ID == 0 {
+		t.Fatal("category type ID should not be 0 after creation")
+	}
+
+	// Create CategoryType Translation
+	tc.categoryTypeTransl.EntityID = tc.categoryType.ID
+	result = db.WithContext(ctx).Create(&tc.categoryTypeTransl)
+	if result.Error != nil {
+		t.Fatalf("failed to create category type translation: %v", result.Error)
+	}
+
+	// Create Category
+	tc.category.TypeID = tc.categoryType.ID
+	result = db.WithContext(ctx).Create(&tc.category)
+	if result.Error != nil {
+		t.Fatalf("failed to create category: %v", result.Error)
+	}
+	if tc.category.ID == 0 {
+		t.Fatal("category ID should not be 0 after creation")
+	}
+
+	// Create Category Translation
+	tc.categoryTransl.EntityID = tc.category.ID
+	result = db.WithContext(ctx).Create(&tc.categoryTransl)
+	if result.Error != nil {
+		t.Fatalf("failed to create category translation: %v", result.Error)
+	}
+
+	// Create Subcategory
+	tc.subcategory.CategoryTypeID = tc.categoryType.ID
+	result = db.WithContext(ctx).Create(&tc.subcategory)
+	if result.Error != nil {
+		t.Fatalf("failed to create subcategory: %v", result.Error)
+	}
+	if tc.subcategory.ID == 0 {
+		t.Fatal("subcategory ID should not be 0 after creation")
+	}
+
+	// Create Subcategory Translation
+	tc.subcategoryTransl.EntityID = tc.subcategory.ID
+	result = db.WithContext(ctx).Create(&tc.subcategoryTransl)
+	if result.Error != nil {
+		t.Fatalf("failed to create subcategory translation: %v", result.Error)
+	}
+
+	// Create Transaction
+	tc.transaction.CategoryID = &tc.category.ID
+	tc.transaction.SubcategoryID = &tc.subcategory.ID
+	result = db.WithContext(ctx).Create(&tc.transaction)
+	if result.Error != nil {
+		t.Fatalf("failed to create transaction: %v", result.Error)
+	}
+	if tc.transaction.ID == 0 {
+		t.Fatal("transaction ID should not be 0 after creation")
+	}
+}
+
+func validateEntities(t *testing.T, ctx context.Context, db *gorm.DB, tc *testCase) {
+	// Test Translation Retrieval
+	var foundCategoryType CategoryType
+	result := db.WithContext(ctx).First(&foundCategoryType, tc.categoryType.ID)
+	if result.Error != nil {
+		t.Fatalf("failed to retrieve category type: %v", result.Error)
+	}
+
+	var translations []Translation
+	result = db.WithContext(ctx).Where("entity_type = ? AND entity_id = ?", EntityTypeCategoryType, foundCategoryType.ID).Find(&translations)
+	if result.Error != nil {
+		t.Fatalf("failed to retrieve translations: %v", result.Error)
+	}
+	foundCategoryType.Translations = translations
+
+	// Test translation methods
+	if foundCategoryType.GetTranslation(LangSV) != tc.categoryTypeTransl.Name {
+		t.Errorf("expected Swedish translation %q, got %q", tc.categoryTypeTransl.Name, foundCategoryType.GetTranslation(LangSV))
+	}
+	if foundCategoryType.GetTranslation(LangEN) != tc.categoryType.Name {
+		t.Errorf("expected English name %q, got %q", tc.categoryType.Name, foundCategoryType.GetTranslation(LangEN))
+	}
+
+	// Test Transaction Retrieval with Relations
+	var found Transaction
+	result = db.WithContext(ctx).Preload("Category").Preload("Subcategory").First(&found, tc.transaction.ID)
+	if result.Error != nil {
+		t.Fatalf("failed to retrieve transaction: %v", result.Error)
+	}
+
+	// Verify transaction details
+	if found.Amount != tc.transaction.Amount {
+		t.Errorf("expected amount %v, got %v", tc.transaction.Amount, found.Amount)
+	}
+	if found.Currency != tc.transaction.Currency {
+		t.Errorf("expected currency %v, got %v", tc.transaction.Currency, found.Currency)
+	}
+	if found.Category == nil {
+		t.Error("expected category to be loaded")
+	}
+	if found.Subcategory == nil {
+		t.Error("expected subcategory to be loaded")
+	}
+}
+
 func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 	ctx, db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	testCases := []struct {
-		name               string
-		categoryType       CategoryType
-		categoryTypeTransl Translation
-		category           Category
-		categoryTransl     Translation
-		subcategory        Subcategory
-		subcategoryTransl  Translation
-		transaction        Transaction
-	}{
+	testCases := []testCase{
 		{
 			name: "Vehicle with translations and transaction",
 			categoryType: CategoryType{
@@ -62,7 +191,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				Description: "Vehicle related expenses",
 			},
 			categoryTypeTransl: Translation{
-				EntityType:   EntityTypeCategoryType,
+				EntityType:   string(EntityTypeCategoryType),
 				LanguageCode: LangSV,
 				Name:         "Fordon",
 			},
@@ -72,7 +201,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				IsActive:           true,
 			},
 			categoryTransl: Translation{
-				EntityType:   EntityTypeCategory,
+				EntityType:   string(EntityTypeCategory),
 				LanguageCode: LangSV,
 				Name:         "Bil",
 			},
@@ -82,7 +211,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				IsSystem:    true,
 			},
 			subcategoryTransl: Translation{
-				EntityType:   EntityTypeSubcategory,
+				EntityType:   string(EntityTypeSubcategory),
 				LanguageCode: LangSV,
 				Name:         "Bränsle",
 			},
@@ -103,7 +232,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				Description: "Regular fixed expenses",
 			},
 			categoryTypeTransl: Translation{
-				EntityType:   EntityTypeCategoryType,
+				EntityType:   string(EntityTypeCategoryType),
 				LanguageCode: LangSV,
 				Name:         "Fasta kostnader",
 			},
@@ -112,7 +241,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				IsActive: true,
 			},
 			categoryTransl: Translation{
-				EntityType:   EntityTypeCategory,
+				EntityType:   string(EntityTypeCategory),
 				LanguageCode: LangSV,
 				Name:         "Medier",
 			},
@@ -122,7 +251,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				IsSystem:    true,
 			},
 			subcategoryTransl: Translation{
-				EntityType:   EntityTypeSubcategory,
+				EntityType:   string(EntityTypeSubcategory),
 				LanguageCode: LangSV,
 				Name:         "Internet",
 			},
@@ -143,7 +272,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				Description: "Income sources",
 			},
 			categoryTypeTransl: Translation{
-				EntityType:   EntityTypeCategoryType,
+				EntityType:   string(EntityTypeCategoryType),
 				LanguageCode: LangSV,
 				Name:         "Inkomster",
 			},
@@ -153,7 +282,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				IsActive:           true,
 			},
 			categoryTransl: Translation{
-				EntityType:   EntityTypeCategory,
+				EntityType:   string(EntityTypeCategory),
 				LanguageCode: LangSV,
 				Name:         "Huvudarbete",
 			},
@@ -163,7 +292,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				IsSystem:    true,
 			},
 			subcategoryTransl: Translation{
-				EntityType:   EntityTypeSubcategory,
+				EntityType:   string(EntityTypeSubcategory),
 				LanguageCode: LangSV,
 				Name:         "Lön",
 			},
@@ -180,109 +309,8 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create CategoryType
-			result := db.WithContext(ctx).Create(&tc.categoryType)
-			if result.Error != nil {
-				t.Fatalf("failed to create category type: %v", result.Error)
-			}
-			if tc.categoryType.ID == 0 {
-				t.Fatal("category type ID should not be 0 after creation")
-			}
-
-			// Create CategoryType Translation
-			tc.categoryTypeTransl.EntityID = tc.categoryType.ID
-			result = db.WithContext(ctx).Create(&tc.categoryTypeTransl)
-			if result.Error != nil {
-				t.Fatalf("failed to create category type translation: %v", result.Error)
-			}
-
-			// Create Category
-			tc.category.TypeID = tc.categoryType.ID
-			result = db.WithContext(ctx).Create(&tc.category)
-			if result.Error != nil {
-				t.Fatalf("failed to create category: %v", result.Error)
-			}
-			if tc.category.ID == 0 {
-				t.Fatal("category ID should not be 0 after creation")
-			}
-
-			// Create Category Translation
-			tc.categoryTransl.EntityID = tc.category.ID
-			result = db.WithContext(ctx).Create(&tc.categoryTransl)
-			if result.Error != nil {
-				t.Fatalf("failed to create category translation: %v", result.Error)
-			}
-
-			// Create Subcategory
-			tc.subcategory.CategoryTypeID = tc.categoryType.ID
-			result = db.WithContext(ctx).Create(&tc.subcategory)
-			if result.Error != nil {
-				t.Fatalf("failed to create subcategory: %v", result.Error)
-			}
-			if tc.subcategory.ID == 0 {
-				t.Fatal("subcategory ID should not be 0 after creation")
-			}
-
-			// Create Subcategory Translation
-			tc.subcategoryTransl.EntityID = tc.subcategory.ID
-			result = db.WithContext(ctx).Create(&tc.subcategoryTransl)
-			if result.Error != nil {
-				t.Fatalf("failed to create subcategory translation: %v", result.Error)
-			}
-
-			// Create Transaction
-			tc.transaction.CategoryID = &tc.category.ID
-			tc.transaction.SubcategoryID = &tc.subcategory.ID
-			result = db.WithContext(ctx).Create(&tc.transaction)
-			if result.Error != nil {
-				t.Fatalf("failed to create transaction: %v", result.Error)
-			}
-			if tc.transaction.ID == 0 {
-				t.Fatal("transaction ID should not be 0 after creation")
-			}
-
-			// Test Translation Retrieval
-			var foundCategoryType CategoryType
-			result = db.WithContext(ctx).First(&foundCategoryType, tc.categoryType.ID)
-			if result.Error != nil {
-				t.Fatalf("failed to retrieve category type: %v", result.Error)
-			}
-
-			var translations []Translation
-			result = db.WithContext(ctx).Where("entity_type = ? AND entity_id = ?", EntityTypeCategoryType, foundCategoryType.ID).Find(&translations)
-			if result.Error != nil {
-				t.Fatalf("failed to retrieve translations: %v", result.Error)
-			}
-			foundCategoryType.Translations = translations
-
-			// Test translation methods
-			if foundCategoryType.GetTranslation(LangSV) != tc.categoryTypeTransl.Name {
-				t.Errorf("expected Swedish translation %q, got %q", tc.categoryTypeTransl.Name, foundCategoryType.GetTranslation(LangSV))
-			}
-			if foundCategoryType.GetTranslation(LangEN) != tc.categoryType.Name {
-				t.Errorf("expected English name %q, got %q", tc.categoryType.Name, foundCategoryType.GetTranslation(LangEN))
-			}
-
-			// Test Transaction Retrieval with Relations
-			var found Transaction
-			result = db.WithContext(ctx).Preload("Category").Preload("Subcategory").First(&found, tc.transaction.ID)
-			if result.Error != nil {
-				t.Fatalf("failed to retrieve transaction: %v", result.Error)
-			}
-
-			// Verify transaction details
-			if found.Amount != tc.transaction.Amount {
-				t.Errorf("expected amount %v, got %v", tc.transaction.Amount, found.Amount)
-			}
-			if found.Currency != tc.transaction.Currency {
-				t.Errorf("expected currency %v, got %v", tc.transaction.Currency, found.Currency)
-			}
-			if found.Category == nil {
-				t.Error("expected category to be loaded")
-			}
-			if found.Subcategory == nil {
-				t.Error("expected subcategory to be loaded")
-			}
+			createAndValidateEntities(t, ctx, db, &tc)
+			validateEntities(t, ctx, db, &tc)
 		})
 	}
 }

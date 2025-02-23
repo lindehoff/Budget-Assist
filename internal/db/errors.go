@@ -2,15 +2,15 @@ package db
 
 import "fmt"
 
-// DatabaseOperationError represents an error that occurs during database operations
+// DatabaseOperationError represents database operation errors
 type DatabaseOperationError struct {
+	Err       error
 	Operation string
 	Entity    string
-	Err       error
 }
 
 func (e DatabaseOperationError) Error() string {
-	return fmt.Sprintf("database %s failed for %s: %v", e.Operation, e.Entity, e.Err)
+	return fmt.Sprintf("database %s operation failed for entity %q: %v", e.Operation, e.Entity, e.Err)
 }
 
 // Common errors

@@ -11,9 +11,9 @@ import (
 
 // ImportError represents import-related errors
 type ImportError struct {
+	Err       error
 	Operation string
 	Source    string
-	Err       error
 }
 
 func (e ImportError) Error() string {
@@ -117,5 +117,7 @@ func init() {
 	importCmd.Flags().BoolP("dry-run", "d", false, "Validate import without saving")
 
 	// Mark required flags
-	importCmd.MarkFlagRequired("format")
+	if err := importCmd.MarkFlagRequired("format"); err != nil {
+		fmt.Printf("failed to mark format flag as required: %v\n", err)
+	}
 }

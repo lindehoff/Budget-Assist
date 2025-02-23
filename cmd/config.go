@@ -12,12 +12,13 @@ import (
 
 // ConfigError represents configuration-related errors
 type ConfigError struct {
-	Operation string
 	Err       error
+	Operation string
+	Key       string
 }
 
 func (e ConfigError) Error() string {
-	return fmt.Sprintf("configuration %s failed: %v", e.Operation, e.Err)
+	return fmt.Sprintf("config %s failed for key %q: %v", e.Operation, e.Key, e.Err)
 }
 
 var (
