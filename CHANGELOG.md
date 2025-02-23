@@ -1,5 +1,36 @@
 # Budget-Assist Changelog
 
+## 1.7.0 (2025-02-23)
+
+* Merge pull request #17 from lindehoff/feat/iteration-1-complete ([](https://github.com/lindehoff/Budget-Assist/commit/7b9c6a606bf2e8e4c5b99abce9be19f152f555cd))
+* improve documentation organization and accessibility ([](https://github.com/lindehoff/Budget-Assist/commit/ecf0b178ad01c823598fe1cc7f84f4c06d4cfcda))
+  - Restructure documentation section in README with clear categories for users and developers
+- Add quick start guide with installation and configuration examples
+- Create comprehensive guides for installation, configuration, and CLI usage
+- Add contributing guidelines with detailed instructions for developers
+- Improve help section with multiple support channels
+- Update documentation links to point to new guide locations
+
+The documentation is now better organized and more accessible, making it easier for both users
+and developers to find the information they need.
+* **core:** complete iteration 1 core infrastructure ([](https://github.com/lindehoff/Budget-Assist/commit/e616451246c3044968ea2aab3b738c3d9762ab6a))
+  Complete foundational project setup and infrastructure implementation:
+
+• ✅ Project structure and CLI framework
+• 🗄️ Database setup with GORM and migrations
+• 🔄 CI/CD pipeline with GitHub Actions
+• 📚 Comprehensive documentation
+• ✨ Error handling implementation
+• 🧪 Test coverage and reporting
+
+All review checklist items completed and verified against design requirements.
+  Closes #1
+* **ci:** improve semantic-release configuration ([](https://github.com/lindehoff/Budget-Assist/commit/002898e85b83e347a1981da355d573310621dd0e))
+  - Add dedicated .releaserc.json file
+- Update GitHub Actions workflow permissions
+- Fix token handling in checkout step
+- Clean up Git references# Please enter the commit message for your changes. Lines starting
+
 ## 1.6.0 (2025-02-23)
 
 * ✨ feat(cicd): enhance CI/CD pipeline and code quality - Configure CI workflow with Go 1.24.0, set up linting with golangci-lint and ESLint, configure test running with race detection, add multi-platform build process ([](https://github.com/lindehoff/Budget-Assist/commit/f9f1a3590054f3fa0ccb8bbf9324c27f6b2bbafb))
