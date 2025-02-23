@@ -55,11 +55,11 @@ Setting up the foundational project infrastructure and basic CLI framework.
   - [x] Automated version bumping
 
 ### 5. Documentation
-- [ ] Create development guide
-- [ ] Document installation process
-- [ ] Add configuration guide
-- [ ] Create contributing guide
-- [ ] Document CLI commands
+- [x] Create development guide
+- [x] Document installation process
+- [x] Add configuration guide
+- [x] Create contributing guide
+- [x] Document CLI commands
 
 ## Daily Standup Questions
 1. What did you complete yesterday?
