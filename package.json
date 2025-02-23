@@ -1,0 +1,26 @@
+{
+  "name": "budget-assist",
+  "version": "0.0.0-development",
+  "private": true,
+  "description": "A personal finance application for tracking expenses and budgeting with AI assistance",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lindehoff/Budget-Assist.git"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.0",
+    "@semantic-release/git": "^10.0.0",
+    "@semantic-release/github": "^9.0.0",
+    "semantic-release": "^24.0.0"
+  },
+  "release": {
+    "branches": ["main"],
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      "@semantic-release/github",
+      "@semantic-release/git"
+    ]
+  }
+} 
