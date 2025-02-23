@@ -23,3 +23,49 @@ go.work.sum
 
 # env file
 .env
+# MacOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+.history/
+
+# SQLite files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Log files
+*.log
+logs/
+
+# Build output
+bin/
+dist/
+build/
+
+# Local development files
+config.local.yaml
+*.local.yaml
+*.local.json
+tmp/

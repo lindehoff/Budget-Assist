@@ -1,0 +1,24 @@
+---
+description: Go testing standards to be followed for writing tests.
+globs: *_test.go
+---
+Testing Standards:
+
+1. Use table-driven tests with descriptive test case names
+1. Only use the standard test library and no third-party like `testify`
+1. Use `context.TODO()` in tests with a TODO comment explaining future improvements
+1. Create helper functions for test data setup (e.g., `createTestProjects()`)
+1. Test both success and error cases
+1. Include validation of error types and messages
+1. Use temporary directories/files for file-based tests
+1. Clean up resources in tests (using `defer` or `t.TempDir()`)
+1. Follow test naming conventions:
+   - Use underscores for readability (e.g., `Successfully_export_nil_projects_slice`)
+   - Prefix success cases with `Successfully_` (e.g., `Successfully_export_single_project`)
+   - Prefix error cases with the operation and `_error_` (e.g., `Export_error_operation_failed`)
+   - Be descriptive about the scenario being tested
+1. Test validation:
+    - Validate all relevant fields in success cases
+    - Include descriptive error messages with expected vs actual values
+    - Use early returns after validation failures
+    - Separate error validation blocks with early returns
