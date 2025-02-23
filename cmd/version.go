@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"runtime"
 
@@ -19,24 +20,58 @@ var (
 	BuildUser = "unknown"
 )
 
+// VersionInfo represents the version information in a structured format
+type VersionInfo struct {
+	Version    string `json:"version"`
+	CommitHash string `json:"commitHash"`
+	BuildTime  string `json:"buildTime"`
+	BuildUser  string `json:"buildUser"`
+	GoVersion  string `json:"goVersion"`
+	OS         string `json:"os"`
+	Arch       string `json:"arch"`
+}
+
 // versionCmd represents the version command
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version and build information",
 	Long: `Print detailed version and build information for Budget-Assist.
-This includes version number, build time, commit hash, and build environment.`,
+This includes version number, build time, commit hash, and build environment.
+Use --json flag to get the output in JSON format for programmatic use.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		jsonOutput, _ := cmd.Flags().GetBool("json")
+		info := VersionInfo{
+			Version:    Version,
+			CommitHash: CommitHash,
+			BuildTime:  BuildTime,
+			BuildUser:  BuildUser,
+			GoVersion:  runtime.Version(),
+			OS:         runtime.GOOS,
+			Arch:       runtime.GOARCH,
+		}
+
+		if jsonOutput {
+			jsonData, err := json.MarshalIndent(info, "", "  ")
+			if err != nil {
+				fmt.Printf("Error generating JSON output: %v\n", err)
+				return
+			}
+			fmt.Println(string(jsonData))
+			return
+		}
+
 		fmt.Printf("Budget-Assist Version Information\n")
 		fmt.Printf("--------------------------------\n")
-		fmt.Printf("Version:     %s\n", Version)
-		fmt.Printf("Commit:      %s\n", CommitHash)
-		fmt.Printf("Built:       %s\n", BuildTime)
-		fmt.Printf("Built by:    %s\n", BuildUser)
-		fmt.Printf("Go version:  %s\n", runtime.Version())
-		fmt.Printf("OS/Arch:     %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("Version:     %s\n", info.Version)
+		fmt.Printf("Commit:      %s\n", info.CommitHash)
+		fmt.Printf("Built:       %s\n", info.BuildTime)
+		fmt.Printf("Built by:    %s\n", info.BuildUser)
+		fmt.Printf("Go version:  %s\n", info.GoVersion)
+		fmt.Printf("OS/Arch:     %s/%s\n", info.OS, info.Arch)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
+	versionCmd.Flags().Bool("json", false, "Output version information in JSON format")
 }
