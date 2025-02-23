@@ -31,12 +31,8 @@
         "commitGroupsSort": "title",
         "commitsSort": ["scope", "subject"],
         "noteGroupsSort": "title",
-        "notesSort": true,
-        "generateOn": "commit",
-        "debug": true,
-        "finalizeContext": {
-          "commitPartial": "* {{#if scope}}**{{scope}}:** {{/if}}{{subject}} ([{{shortHash}}]({{@root.host}}/{{@root.owner}}/{{@root.repository}}/commit/{{hash}})){{#if body}}\n\n  {{body}}{{/if}}{{#if footer}}\n\n  {{footer}}{{/if}}\n"
-        }
+        "template": "{{> header}}\n\n{{#each commitGroups}}\n### {{title}}\n\n{{#each commits}}\n{{> commit}}\n{{/each}}\n{{/each}}\n\n{{> footer}}",
+        "commit": "* {{#if scope}}**{{scope}}:** {{/if}}{{subject}} ([{{shortHash}}]({{@root.host}}/{{@root.owner}}/{{@root.repository}}/commit/{{hash}})){{#if body}}\n\n  {{body}}{{/if}}{{#if footer}}\n\n  {{footer}}{{/if}}"
       }
     }],
     ["@semantic-release/changelog", {
