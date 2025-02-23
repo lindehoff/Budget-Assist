@@ -7,6 +7,7 @@
 package db
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -35,14 +36,14 @@ type Translation struct {
 
 // CategoryType represents different types of categories (e.g., VEHICLE, PROPERTY)
 type CategoryType struct {
-	ID            uint      `gorm:"primarykey"`
-	CreatedAt     time.Time `gorm:"not null"`
-	UpdatedAt     time.Time `gorm:"not null"`
-	Name          string    `gorm:"not null;unique;size:100"`
-	Description   string    `gorm:"size:500"`
-	IsMultiple    bool      `gorm:"not null"`
-	Categories    []Category
-	Subcategories []Subcategory
+	ID            uint          `gorm:"primarykey"`
+	CreatedAt     time.Time     `gorm:"not null"`
+	UpdatedAt     time.Time     `gorm:"not null"`
+	Name          string        `gorm:"not null;unique;size:100"`
+	Description   string        `gorm:"size:500"`
+	IsMultiple    bool          `gorm:"not null"`
+	Categories    []Category    `gorm:"foreignKey:TypeID"`
+	Subcategories []Subcategory `gorm:"foreignKey:CategoryTypeID"`
 	Translations  []Translation `gorm:"polymorphic:Entity;polymorphicValue:category_type"`
 }
 
@@ -110,16 +111,26 @@ type Transaction struct {
 	ID              uint `gorm:"primarykey"`
 	CategoryID      *uint
 	SubcategoryID   *uint
-	Amount          float64   `gorm:"not null"`
-	CreatedAt       time.Time `gorm:"not null"`
-	UpdatedAt       time.Time `gorm:"not null"`
-	TransactionDate time.Time `gorm:"not null"`
-	Description     string    `gorm:"size:500"`
-	RawData         string    `gorm:"size:1000"`
-	AIAnalysis      string    `gorm:"size:1000"`
-	Currency        string    `gorm:"not null;size:3"`
-	Category        *Category
-	Subcategory     *Subcategory
+	Amount          float64      `gorm:"not null"`
+	CreatedAt       time.Time    `gorm:"not null"`
+	UpdatedAt       time.Time    `gorm:"not null"`
+	TransactionDate time.Time    `gorm:"not null"`
+	Description     string       `gorm:"size:500"`
+	RawData         string       `gorm:"size:1000"`
+	AIAnalysis      string       `gorm:"size:1000"`
+	Currency        string       `gorm:"not null;size:3"`
+	Category        *Category    `gorm:"foreignKey:CategoryID"`
+	Subcategory     *Subcategory `gorm:"foreignKey:SubcategoryID"`
+}
+
+// BeforeCreate hook to validate the currency
+func (t *Transaction) BeforeCreate(tx *gorm.DB) error {
+	switch t.Currency {
+	case CurrencySEK, CurrencyEUR, CurrencyUSD:
+		return nil
+	default:
+		return fmt.Errorf("invalid currency: %s", t.Currency)
+	}
 }
 
 // Tag represents a label that can be attached to transactions
@@ -135,17 +146,17 @@ type Budget struct {
 	ID             uint `gorm:"primarykey"`
 	CategoryID     uint `gorm:"not null"`
 	SubcategoryID  *uint
-	Amount         float64   `gorm:"not null"`
-	CreatedAt      time.Time `gorm:"not null"`
-	UpdatedAt      time.Time `gorm:"not null"`
-	StartDate      time.Time `gorm:"not null"`
-	EndDate        time.Time `gorm:"not null"`
-	Description    string    `gorm:"size:500"`
-	RecurrenceRule string    `gorm:"size:100"`
-	Currency       string    `gorm:"not null;size:3"`
-	IsRecurring    bool      `gorm:"not null"`
-	Category       Category
-	Subcategory    *Subcategory
+	Amount         float64      `gorm:"not null"`
+	CreatedAt      time.Time    `gorm:"not null"`
+	UpdatedAt      time.Time    `gorm:"not null"`
+	StartDate      time.Time    `gorm:"not null"`
+	EndDate        time.Time    `gorm:"not null"`
+	Description    string       `gorm:"size:500"`
+	RecurrenceRule string       `gorm:"size:100"`
+	Currency       string       `gorm:"not null;size:3"`
+	IsRecurring    bool         `gorm:"not null"`
+	Category       Category     `gorm:"foreignKey:CategoryID"`
+	Subcategory    *Subcategory `gorm:"foreignKey:SubcategoryID"`
 }
 
 // Report represents saved analysis reports

@@ -9,6 +9,11 @@ func Test_Successfully_seed_predefined_categories(t *testing.T) {
 	ctx, db, cleanup := setupTestDB(t)
 	defer cleanup()
 
+	// Seed the database with predefined categories
+	if err := SeedPredefinedCategories(ctx, db); err != nil {
+		t.Fatalf("failed to seed predefined categories: %v", err)
+	}
+
 	testCases := []struct {
 		name          string
 		categoryType  string
