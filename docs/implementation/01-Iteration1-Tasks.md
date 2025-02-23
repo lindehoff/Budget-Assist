@@ -32,11 +32,11 @@ Setting up the foundational project infrastructure and basic CLI framework.
 - [x] Add import command skeleton
 
 ### 3. Database Setup
-- [ ] Create initial schema
-- [ ] Set up gorm configuration
-- [ ] Implement migrations system
-- [ ] Create base models
-- [ ] Add database tests
+- [x] Create initial schema
+- [x] Set up gorm configuration
+- [x] Implement migrations system
+- [x] Create base models
+- [x] Add database tests
 
 ### 4. CI/CD Pipeline
 - [x] Create GitHub Actions workflow
