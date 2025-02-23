@@ -1,0 +1,34 @@
+---
+description: Code Style and Standards outlines the essential practices for writing Go code that is maintainable, efficient, and idiomatic.
+globs: *.go
+---
+These guidelines ensure that the code adheres to best practices, promotes clarity, and facilitates error handling and logging.
+
+## Code Style and Standards:
+
+1. Follow Go best practices and idiomatic patterns
+1. Use structured error handling with custom error types when appropriate
+1. Implement proper context handling in all operations
+1. Include comprehensive logging using slog
+1. Write clear, self-documenting code with appropriate comments
+1. Ensure all exported types and functions have proper documentation
+
+## Code Organization:
+
+1. Group related functionality in the same package
+1. Use clear and consistent naming conventions
+1. Separate interfaces and implementations
+1. Keep functions focused and single-purpose
+1. Use dependency injection for better testability
+
+## When making changes:
+
+1. Consider backward compatibility
+1. Update tests to reflect changes
+1. Update documentation when behavior changes
+1. Consider error cases and edge conditions
+1. Maintain consistent logging patterns
+
+## How we want things done:
+
+1. Never use an empty interface like `interface {}` allways use `any`

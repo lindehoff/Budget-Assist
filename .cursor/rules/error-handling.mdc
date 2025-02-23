@@ -1,0 +1,28 @@
+---
+description: Error handling practices for the codebase.
+globs: *.go
+---
+Error Handling:
+
+1. Use custom error types for domain-specific errors:
+
+   ```go
+   type OperationError struct {
+       Operation string
+       Resource  string    // Optional, for resource-specific errors
+       Err       error
+   }
+
+   func (e OperationError) Error() string {
+       if e.Resource != "" {
+           return fmt.Sprintf("%s operation failed for %q: %v", e.Operation, e.Resource, e.Err)
+       }
+       return fmt.Sprintf("%s operation failed: %v", e.Operation, e.Err)
+   }
+   ```
+
+1. Define package-level error variables for common errors using `errors.New()`
+1. Use error wrapping with `fmt.Errorf()` and `%w` only for non-domain-specific errors
+1. Include appropriate error context in logs
+1. Validate inputs and return early with clear error messages
+1. Handle empty/nil cases explicitly

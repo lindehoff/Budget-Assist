@@ -1,0 +1,12 @@
+---
+description: When asked to provide a commit message
+globs: 
+---
+Commit Messages:
+
+1. Follow conventional commits format: `type(scope): description`
+1. Types: feat, fix, refactor, test, docs, etc.
+1. Include a clear scope indicating the affected component
+1. Write a concise description of the change
+1. Add bullet points for detailed changes in the commit body, it's ok to use emojis
+1. Limit all commit message lines to 100 characters maximum
