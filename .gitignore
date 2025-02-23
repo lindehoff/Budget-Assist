@@ -69,3 +69,7 @@ config.local.yaml
 *.local.yaml
 *.local.json
 tmp/
+
+# Project specific
+budgetassist
+budgetassist.exe
