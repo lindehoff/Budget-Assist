@@ -47,18 +47,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npx semantic-release
+        run: |
+          VERSION=$(npx semantic-release --dry-run | grep -oP 'The next release version is \K[0-9]+\.[0-9]+\.[0-9]+' || echo '')
+          if [ -n "$VERSION" ]; then
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            npx semantic-release
+          fi
 
       - name: Build Go binaries
-        if: steps.semantic_release.outcome == 'success'
+        if: steps.semantic_release.outputs.version != ''
         run: make release-build
 
       - name: Upload release binaries
-        if: steps.semantic_release.outcome == 'success'
+        if: steps.semantic_release.outputs.version != ''
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: dist/*
-          tag: v${{ steps.semantic_release.outputs.new_release_version }}
+          tag: v${{ steps.semantic_release.outputs.version }}
           overwrite: true
           file_glob: true
