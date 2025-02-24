@@ -1,5 +1,65 @@
 # Budget-Assist Changelog
 
+## 2.0.0 (2025-02-24)
+
+* Merge pull request #18 from lindehoff/docs/update-iteration2-progress ([](https://github.com/lindehoff/Budget-Assist/commit/7d683397ecb7c383b1ec37221b34c3a1962e40f3))
+* Merge pull request #19 from lindehoff/feat/csv-processor-seb ([](https://github.com/lindehoff/Budget-Assist/commit/b8560d9b940154eb9d8b58f09a42934fdc85b7d1))
+  feat(processor): implement SEB CSV processor and complete Iteration 2
+* **docprocess:** 📄 implement document processing core and PDF handler 🛠️ ([](https://github.com/lindehoff/Budget-Assist/commit/2e767299af9df703fb5dfc72279a1c21bb6f49ea))
+  - ✨ Add document processor interface and factory pattern for extensibility
+- 📝 Implement PDF processing with pdfcpu for text extraction
+- 🛡️ Create robust error handling system with processing stages
+- 🧪 Add comprehensive test suite with table-driven tests
+- 🏗️ Implement transaction model with proper field alignment
+
+Technical details:
+- 🔍 Add ProcessingError with stage-based error handling
+- 🎯 Implement DocumentProcessor and ProcessorFactory interfaces
+- 📋 Add PDF text extraction with proper temp file handling
+- ✅ Create test framework ready for integration tests
+- 📚 Update iteration 2 documentation to reflect implementation
+  Breaking changes: none 🚀
+* **processor:** implement SEB CSV processor and complete Iteration 2 ([](https://github.com/lindehoff/Budget-Assist/commit/6f8fedd24978b925933029e07a2604c9917e4fa1))
+  🎯 Core Features:
+- Implemented SEB CSV processor with comprehensive error handling
+- Added table-driven tests following Go standards
+- Updated PDF processor imports to use correct pdfcpu paths
+- Optimized struct field alignment for better memory usage
+
+📝 Documentation:
+- Marked Iteration 2 as complete
+- Moved non-critical tasks to Future Improvements
+- Updated success criteria and review checklist
+- Added detailed implementation notes
+
+🧪 Testing:
+- Added comprehensive test suite for SEB processor
+- Included success and error test cases
+- Added IO failure scenarios
+- Implemented proper validation blocks
+
+🔧 Technical Improvements:
+- Fixed dependency management in go.mod
+- Optimized memory layout of Transaction and ProcessingError structs
+- Added structured logging with proper context
+- Implemented early returns for validation
+* **ci:** resolve semantic-release versioning and Git permission issues ([](https://github.com/lindehoff/Budget-Assist/commit/f0ec774728ee33189f84b4780808a235680db6e3))
+  * Reorder workflow steps to run semantic-release before building binaries
+* Add proper Git configuration for GitHub Actions bot
+* Update Makefile version detection to use semantic version tags
+* Fix release artifact upload to use correct semantic version tag
+* Add conditional steps to ensure proper release flow
+* **ci:** resolve version handling in release workflow and Makefile ([](https://github.com/lindehoff/Budget-Assist/commit/96b47792532f34698ce6cba189ec2acf368b47fc))
+  * Update VERSION variable in Makefile to use consistent tag detection
+* Add explicit release tag retrieval step in GitHub Actions workflow
+* Update upload-release-action to use correct tag reference
+* Remove conditional release step to prevent race conditions
+
+
+### Breaking changes
+
+* none 🚀
+
 ## 1.7.0 (2025-02-23)
 
 * Merge pull request #17 from lindehoff/feat/iteration-1-complete ([](https://github.com/lindehoff/Budget-Assist/commit/7b9c6a606bf2e8e4c5b99abce9be19f152f555cd))
