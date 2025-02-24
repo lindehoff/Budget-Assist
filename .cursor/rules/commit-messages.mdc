@@ -12,3 +12,4 @@ Commit Messages:
 1. Add bullet points for detailed changes in the commit body, it's ok to use emojis
 1. Written in markdown
 1. First commit line can't be over 70 and the following lines must be limited to 100 characters maximum
+1. Never try to run the commit command your self only pass me the message.

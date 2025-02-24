@@ -2,33 +2,47 @@ package ai
 
 import "fmt"
 
-// AIError represents errors from AI operations
-type AIError struct {
+// Error represents a base error type for the AI package
+type Error struct {
+	Err     error
+	Code    string
+	Message string
+}
+
+func (e *Error) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %s: %v", e.Code, e.Message, e.Err)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// StatusError represents an error with an HTTP status code
+type StatusError struct {
 	Err        error
-	Operation  string
-	Model      string
+	Code       string
+	Message    string
 	StatusCode int
 }
 
-func (e AIError) Error() string {
-	if e.StatusCode != 0 {
-		return fmt.Sprintf("AI %s operation failed with model %q (status %d): %v",
-			e.Operation, e.Model, e.StatusCode, e.Err)
+func (e *StatusError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s (status %d): %s: %v", e.Code, e.StatusCode, e.Message, e.Err)
 	}
-	return fmt.Sprintf("AI %s operation failed with model %q: %v",
-		e.Operation, e.Model, e.Err)
+	return fmt.Sprintf("%s (status %d): %s", e.Code, e.StatusCode, e.Message)
 }
 
-// CategoryError represents category prediction errors
+// CategoryError represents an error related to category operations
 type CategoryError struct {
-	Err         error
-	Transaction string
-	Confidence  float64
+	Err      error
+	Category string
+	Message  string
 }
 
-func (e CategoryError) Error() string {
-	return fmt.Sprintf("category prediction failed for transaction %q (confidence: %.2f): %v",
-		e.Transaction, e.Confidence, e.Err)
+func (e *CategoryError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("category %q error: %s: %v", e.Category, e.Message, e.Err)
+	}
+	return fmt.Sprintf("category %q error: %s", e.Category, e.Message)
 }
 
 // Common errors
@@ -39,28 +53,30 @@ var (
 	ErrInvalidInput     = fmt.Errorf("invalid input for AI processing")
 )
 
-// Error constructors
-func NewAIError(operation, model string, err error) error {
-	return AIError{
-		Operation: operation,
-		Model:     model,
-		Err:       err,
+// NewError creates a new Error instance with the given code and message
+func NewError(code, message string, err error) *Error {
+	return &Error{
+		Err:     err,
+		Code:    code,
+		Message: message,
 	}
 }
 
-func NewAIStatusError(operation, model string, statusCode int, err error) error {
-	return AIError{
-		Operation:  operation,
-		Model:      model,
-		StatusCode: statusCode,
+// NewStatusError creates a new StatusError instance with the given code, message, and status code
+func NewStatusError(code string, statusCode int, message string, err error) *StatusError {
+	return &StatusError{
 		Err:        err,
+		Code:       code,
+		Message:    message,
+		StatusCode: statusCode,
 	}
 }
 
-func NewCategoryError(transaction string, confidence float64, err error) error {
-	return CategoryError{
-		Transaction: transaction,
-		Confidence:  confidence,
-		Err:         err,
+// NewCategoryError creates a new CategoryError instance with the given category and message
+func NewCategoryError(category, message string, err error) *CategoryError {
+	return &CategoryError{
+		Err:      err,
+		Category: category,
+		Message:  message,
 	}
 }
