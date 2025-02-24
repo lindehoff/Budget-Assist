@@ -1,5 +1,13 @@
 # Budget-Assist Changelog
 
+## <small>2.0.3 (2025-02-24)</small>
+
+* **ci:** improve semantic-release version capture and handling ([](https://github.com/lindehoff/Budget-Assist/commit/ade400b9a47742330d9d0a3018cd2240c30eff39))
+  * Add dry-run step to extract next version before actual release
+* Store version in GitHub output for subsequent steps
+* Update conditional checks to use captured version
+* Fix version reference in upload-release-action
+
 ## <small>2.0.2 (2025-02-24)</small>
 
 * **ci:** prevent duplicate releases by using semantic version tag ([](https://github.com/lindehoff/Budget-Assist/commit/2daea4fa8cb2a185bc4c1fea69ade947816591f0))
