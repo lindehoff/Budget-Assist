@@ -129,25 +129,52 @@ Flags:
 
 ### 5. Category Management
 
-#### categories list
+#### category list
 Lists all categories.
 ```bash
-budget-assist categories list [flags]
+budget-assist category list [flags]
 
 Flags:
   --format string   Output format (table|json) (default "table")
 ```
 
-#### categories add
+#### category add
 Adds a new category.
 ```bash
-budget-assist categories add [name] [flags]
+budget-assist category add [name] [flags]
 
 Flags:
-  --parent string    Parent category name
-  --budget float    Monthly budget amount
-  --color string    Category color (hex)
+  --description string   Category description (required)
+  --parent string       Parent category name
+  --budget float       Monthly budget amount
+  --color string       Category color (hex)
 ```
+
+#### category update
+Updates an existing category.
+```bash
+budget-assist category update [id] [flags]
+
+Flags:
+  --name string        New category name
+  --description string New category description
+  --active bool       Set category active status
+  --parent string     New parent category name
+  --budget float     New monthly budget amount
+  --color string     New category color (hex)
+```
+
+#### category delete
+Removes a category (marks as inactive).
+```bash
+budget-assist category delete [id] [flags]
+
+Flags:
+  --force    Skip confirmation prompt
+```
+
+Note: When a category is deleted, it is marked as inactive rather than being permanently removed.
+This ensures that historical transactions maintain their categorization.
 
 ### 6. Report Commands
 

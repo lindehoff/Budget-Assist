@@ -122,7 +122,11 @@ Implementing AI capabilities using OpenAI's API for intelligent transaction cate
 - [x] Create example management
 
 ### 5. CLI Tool Development 🔄
-- [ ] Create category management commands
+- [x] Create category management commands
+  - [x] List categories with table/JSON output
+  - [x] Add new categories with validation
+  - [x] Update existing categories
+  - [x] Soft delete with confirmation
 - [ ] Add prompt management interface
 - [ ] Implement testing commands
 - [ ] Add configuration management

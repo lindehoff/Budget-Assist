@@ -84,14 +84,18 @@ This document outlines the implementation strategy for Budget Assist using OKRs 
 - [x] Set up OpenAI service client
 - [x] Implement transaction categorization
 - [x] Create category management system
+  - [x] Core category operations (CRUD)
+  - [x] CLI commands for category management
+  - [x] Documentation and examples
+  - [x] Error handling and validation
 - [x] Add confidence scoring
 - [x] Implement error handling
 - [x] Write comprehensive tests
 - [ ] Implement prompt management
 - [ ] Add response caching
-- [ ] Create CLI tools
+- [ ] Create remaining CLI tools
 
-**Status**: Core AI functionality implemented using OpenAI, additional features in progress
+**Status**: Core AI functionality and category management implemented, additional features in progress
 
 ### Iteration 4: Web Server & API (Weeks 7-8)
 
