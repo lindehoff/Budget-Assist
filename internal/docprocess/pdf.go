@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
-	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 )
 
 // PDFProcessor implements DocumentProcessor for PDF files
@@ -47,7 +47,7 @@ func (p *PDFProcessor) Validate(file io.Reader) error {
 	}
 
 	// Validate PDF
-	conf := pdfcpu.NewDefaultConfiguration()
+	conf := model.NewDefaultConfiguration()
 	if err := api.Validate(bytes.NewReader(buf.Bytes()), conf); err != nil {
 		return &ProcessingError{
 			Stage:    StageValidation,
@@ -72,7 +72,7 @@ func (p *PDFProcessor) Process(ctx context.Context, file io.Reader, filename str
 	}
 
 	// Get page count
-	conf := pdfcpu.NewDefaultConfiguration()
+	conf := model.NewDefaultConfiguration()
 	pageCount, err := api.PageCount(bytes.NewReader(buf.Bytes()), conf)
 	if err != nil {
 		return nil, &ProcessingError{
