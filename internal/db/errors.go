@@ -1,6 +1,9 @@
 package db
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // DatabaseOperationError represents database operation errors
 type DatabaseOperationError struct {
@@ -19,4 +22,5 @@ var (
 	ErrDuplicateEntry      = fmt.Errorf("duplicate entry")
 	ErrTranslationMissing  = fmt.Errorf("required translation missing")
 	ErrInvalidLanguage     = fmt.Errorf("invalid language code")
+	ErrNotFound            = errors.New("record not found")
 )
