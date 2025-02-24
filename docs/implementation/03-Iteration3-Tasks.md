@@ -1,11 +1,11 @@
-# Iteration 3: AI Integration
+# Iteration 3: OpenAI Integration
 
 ## Current Focus
-Implementing AI capabilities for intelligent transaction categorization and data extraction.
+Implementing AI capabilities using OpenAI's API for intelligent transaction categorization and document information extraction, with support for multiple use cases and configurable prompts.
 
 ## Tasks Breakdown
 
-### 1. AI Service Client ✅
+### 1. OpenAI Service Client ✅
 - [x] Create AI service interface
   ```go
   type AIService interface {
@@ -14,13 +14,21 @@ Implementing AI capabilities for intelligent transaction categorization and data
       SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error)
   }
   ```
-- [x] Implement LLM client (OpenAI)
+- [x] Implement OpenAI client
   ```go
   type OpenAIService struct {
-      rateLimiter *RateLimiter  // 8 bytes (pointer)
-      client      *http.Client  // 8 bytes (pointer)
-      config      AIConfig      // struct
-      retryConfig RetryConfig   // struct
+      client      *openai.Client  // OpenAI's official Go client
+      config      AIConfig        // Configuration struct
+      rateLimiter *RateLimiter   // Rate limiter for API calls
+  }
+
+  type AIConfig struct {
+      Model               string        // e.g., "gpt-4-turbo-preview"
+      APIKey             string        // OpenAI API key
+      MaxTokens          int           // Maximum tokens per request
+      Temperature        float32       // Response randomness (0-1)
+      RequestTimeout     time.Duration // Timeout for API calls
+      RetryAttempts     int           // Number of retry attempts
   }
   ```
 - [x] Add retry and fallback logic
@@ -35,112 +43,243 @@ Implementing AI capabilities for intelligent transaction categorization and data
   - Added configurable limits
   - Created burst handling
 
-### 2. Transaction Categorization ✅
-- [x] Implement prompt templates
+### 2. Transaction Categorization with OpenAI ✅
+- [x] Implement prompt engineering
   ```go
   type PromptTemplate struct {
-      Name     string
-      Template string
-      Examples []Example
-      Rules    []string
+      SystemPrompt    string   // Context and instructions for the model
+      UserPrompt      string   // Transaction-specific prompt
+      FewShotExamples []Example // Example transactions for better accuracy
   }
   ```
 - [x] Create category matching logic
-  - Added structured prompts
-  - Implemented example-based learning
-  - Created rule-based guidance
+  - Structured JSON response parsing
+  - Confidence score extraction
+  - Category validation
 - [x] Add confidence scoring
-  - Implemented in Analysis struct
+  - Using OpenAI's confidence scores
   - Added validation thresholds
 - [x] Create category suggestions
-  - Added multi-category support
-  - Implemented confidence ranking
+  - Multiple category support
+  - Confidence-based ranking
 
-### 3. Training Data Pipeline 🔄
-- [ ] Design training data schema
+### 3. Category Management System 🔄
+- [ ] Implement category structure
   ```go
-  type TrainingExample struct {
-      Category    Category
-      CreatedAt   time.Time
-      Input       string
-      ValidatedBy string
-      Confidence  float64
+  type Category struct {
+      ID          string
+      Path        string      // e.g., "expenses.housing.rent"
+      Name        string
+      Description string
+      Rules       []Rule
+      Examples    []Example
   }
   ```
-- [ ] Create data collection system
-- [ ] Implement validation workflow
-- [ ] Add data export/import
-- [ ] Create training data management UI
+- [ ] Create category validation
+- [ ] Add category import/export
+- [ ] Implement category-specific rules
+- [ ] Add example management
 
-### 4. Confidence Scoring 🔄
-- [x] Implement scoring algorithm
-- [ ] Add historical comparison
-- [ ] Create confidence thresholds
-- [ ] Implement manual review queue
-- [ ] Add performance metrics
+### 4. Prompt Management System 🔄
+- [ ] Implement prompt types
+  ```go
+  type PromptTemplate struct {
+      Type         PromptType
+      SystemPrompt string
+      UserPrompt   string
+      Categories   []Category
+      Rules        []Rule
+      Version      string
+  }
+  ```
+- [ ] Create prompt versioning
+- [ ] Add prompt testing
+- [ ] Implement prompt validation
+- [ ] Create example management
 
-### 5. Fallback Mechanisms 🔄
-- [x] Create pattern matching system
-- [ ] Implement rules engine
-- [ ] Add historical lookup
-- [ ] Create manual categorization
-- [ ] Implement default categories
+### 5. CLI Tool Development 🔄
+- [ ] Create category management commands
+- [ ] Add prompt management interface
+- [ ] Implement testing commands
+- [ ] Add configuration management
+- [ ] Create import/export functionality
+
+### 6. Response Management 🔄
+- [ ] Design response caching
+- [ ] Implement response validation
+- [ ] Add cost tracking
+- [ ] Create usage analytics
+- [ ] Implement rate limit monitoring
+
+### 7. Document Analysis Pipeline 🔄
+- [x] Implement PDF processing with pdfcpu
+  ```go
+  type PDFProcessor struct {
+      logger        *slog.Logger
+      aiService     AIService
+      storage       Storage
+      validator     Validator
+      conf          *model.Configuration
+  }
+  ```
+- [x] Create text extraction service
+  - [x] PDF text extraction using pdfcpu
+  - [x] Basic validation
+  - [x] Error handling
+- [ ] Enhance document analysis
+  - [ ] Document type detection
+  - [ ] Smart prompt selection
+  - [ ] Multi-page handling
+  - [ ] OCR integration for scanned documents
+- [ ] Implement OpenAI integration
+  - [ ] Document-specific prompts
+  - [ ] Response parsing
+  - [ ] Transaction extraction
+  - [ ] Confidence scoring
+- [ ] Add validation pipeline
+  - [ ] Amount validation
+  - [ ] Date validation
+  - [ ] Category validation
+  - [ ] Confidence thresholds
+- [ ] Enhance storage integration
+  - [ ] Document storage
+  - [ ] Extraction results
+  - [ ] Transaction metadata
+
+### 8. Document Processing CLI 🔄
+- [ ] Add document processing commands
+  ```go
+  type DocumentCommands struct {
+      Process  func(filepath string) error
+      List     func() []ProcessedDocument
+      Export   func(id string) error
+      Status   func(id string) *ProcessingStatus
+  }
+  ```
+- [ ] Implement batch processing
+- [ ] Add progress tracking
+- [ ] Create export functionality
+- [ ] Add validation commands
+
+### 9. Storage Integration 🔄
+- [ ] Implement document storage
+  ```go
+  type Storage interface {
+      StoreDocument(ctx context.Context, doc *ProcessedDocument) error
+      StoreExtractionResult(ctx context.Context, result *ExtractionResult) error
+      StoreTransactions(ctx context.Context, transactions []Transaction) error
+  }
+  ```
+- [ ] Add transaction storage
+- [ ] Create metadata storage
+- [ ] Implement batch operations
+- [ ] Add data validation
 
 ## Integration Points
 - [x] Transaction processing from Iteration 2
 - [x] Database models from Iteration 1
+- [ ] CLI integration
+- [ ] Document processing pipeline
+- [ ] Storage integration
 - [ ] Preparing for API integration in Iteration 4
 
 ## Review Checklist
-- [x] AI service operational
-- [x] Categorization working
-- [ ] Training pipeline established
+- [x] OpenAI service operational
+- [x] Basic categorization working
+- [ ] Category management implemented
+- [ ] CLI tool functional
+- [ ] Prompt management working
+- [ ] Response caching implemented
 - [ ] Fallbacks tested
 - [x] Documentation updated
 - [ ] Performance metrics collected
+- [ ] PDF processing implemented
+- [ ] Document extraction working
+- [ ] Storage integration complete
+- [ ] Batch processing functional
+- [ ] Export functionality working
 
 ## Success Criteria
-1. [ ] Categorization accuracy > 85%
-2. [x] Response time < 2 seconds (with retry/timeout config)
+1. [ ] Categorization accuracy > 90% (using GPT-4)
+2. [x] Response time < 1 second (with caching)
 3. [ ] Fallback success rate > 95%
-4. [ ] Training data pipeline working
+4. [ ] Cost per transaction < $0.01
 5. [x] Test coverage > 80%
+6. [ ] CLI commands implemented and tested
+7. [ ] Category management working
+8. [ ] Prompt management operational
+9. [ ] PDF processing accuracy > 85%
+10. [ ] Document processing time < 30 seconds
+11. [ ] Storage integration tested
+12. [ ] Batch processing working
 
 ## Technical Considerations
 
-### AI Service Configuration ✅
+### OpenAI Configuration ✅
 ```go
-type AIConfig struct {
-    BaseURL             string
-    APIKey              string
-    RequestTimeout      time.Duration
-    MaxRetries          int
-    ConfidenceThreshold float64
-    CacheEnabled        bool
+type OpenAIConfig struct {
+    Model               string        // GPT model to use
+    APIKey             string        // OpenAI API key
+    OrgID              string        // Optional organization ID
+    MaxTokens          int           // Token limit per request
+    Temperature        float32       // Response randomness
+    RequestTimeout     time.Duration // API timeout
+    RetryConfig       RetryConfig   // Retry settings
 }
 ```
 
 ### Error Handling ✅
 ```go
-type AIError struct {
-    Stage       string
-    StatusCode  int
-    Message     string
-    RetryCount  int
-    Raw         []byte
+type OpenAIError struct {
+    StatusCode   int
+    Message      string
+    Type        string    // error type from OpenAI
+    RetryCount   int
+    RequestID    string
+}
+```
+
+### Document Processing Configuration ✅
+```go
+type PDFConfig struct {
+    ExtractorConfig *model.Configuration  // pdfcpu configuration
+    AIConfig        *OpenAIConfig         // OpenAI configuration
+    StorageConfig   *StorageConfig        // Storage configuration
+    ValidationRules []ValidationRule      // Validation rules
 }
 ```
 
 ### Monitoring 🔄
 - [x] Response times
-- [ ] Accuracy metrics
-- [x] API usage
+- [x] Token usage
+- [x] API costs
 - [x] Error rates
-- [x] Fallback triggers
+- [x] Cache hit rates
+- [ ] Document processing times
+- [ ] Extraction accuracy
+- [ ] Storage performance
+- [ ] Batch processing metrics
+- [ ] PDF extraction success rate
+- [ ] OCR accuracy metrics
+- [ ] Storage performance
 
 ## Notes
-- [x] Keep AI service modular for future LLM changes
-- [x] Document prompt engineering decisions
-- [x] Monitor API costs
+- [x] Use OpenAI's official Go client
+- [x] Monitor API costs carefully
+- [x] Implement proper rate limiting
 - [x] Consider privacy implications
-- [ ] Plan for model updates 
+- [ ] Plan for model updates
+- [ ] Document CLI usage
+- [ ] Create example prompts
+- [ ] Test with various document types
+- [ ] Test with various PDF formats
+- [ ] Implement proper error handling for PDF processing
+- [ ] Consider OCR requirements
+- [ ] Plan for large document handling
+- [ ] Document storage requirements
+- [x] PDF extraction using pdfcpu implemented
+- [ ] Add OCR support for scanned documents
+- [ ] Implement smart prompt selection
+- [ ] Add multi-page document handling
+- [ ] Create document type detection
+- [ ] Enhance error handling for PDF processing 
