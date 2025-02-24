@@ -1,5 +1,32 @@
 # Budget-Assist Changelog
 
+## 2.1.0 (2025-02-24)
+
+* Merge pull request #20 from lindehoff/feature/ai-service-integration ([](https://github.com/lindehoff/Budget-Assist/commit/4154f1f5928e2da9aca051024fa5428264ceb54a))
+  Feature/ai service integration
+* **ai:** implement OpenAI service integration 🤖 ([](https://github.com/lindehoff/Budget-Assist/commit/bfbf6a9f1967cc8a62fe25a49e6fd09b1fb4654e))
+  • 🎯 Added core AI service interface and OpenAI implementation
+• 📝 Created prompt template system with example-based learning
+• ⚡ Implemented rate limiting and retry logic with exponential backoff
+• 🛡️ Added comprehensive error handling and monitoring
+• 📦 Updated dependencies to include rate limiting support
+• ✅ Updated iteration 3 task list with completed items
+* **lint:** adjust golangci-lint configuration for better test handling ([](https://github.com/lindehoff/Budget-Assist/commit/8bc63d239bdb48c9c5923533bffbecfb413fb7d7))
+  • Allow test files to remain in the same package as the code they test
+• Configure more permissive linting rules for test files:
+  - Disable field alignment checks (govet)
+  - Allow longer lines and higher complexity (lll, gocognit)
+  - Skip whitespace and style rules (wsl, revive)
+  - Allow TODO comments and context usage (godox, noctx)
+• Disable opinionated linters for all files:
+  - Comment formatting (godot)
+  - TODO comments (godox)
+  - Style checks (revive)
+  - Formatting (gofumpt)
+  - Nolint directives (nolintlint)
+
+This change improves test maintainability while keeping strict standards for production code.
+
 ## <small>2.0.3 (2025-02-24)</small>
 
 * **release:** 2.0.3 [skip ci] ([](https://github.com/lindehoff/Budget-Assist/commit/2ba03c9e6c5e461a9d398e9708d0684d11e42dfc))
