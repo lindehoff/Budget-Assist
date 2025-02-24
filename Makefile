@@ -1,6 +1,6 @@
 # Build variables
 BINARY_NAME=budgetassist
-VERSION=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+VERSION=$(shell git describe --tags --abbrev=0 2>/dev/null || git rev-parse --abbrev-ref HEAD)
 COMMIT_HASH=$(shell git rev-parse --short HEAD)
 BUILD_TIME=$(shell date -u '+%Y-%m-%d %H:%M:%S')
 BUILD_USER=$(shell whoami)
