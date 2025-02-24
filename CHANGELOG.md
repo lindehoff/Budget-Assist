@@ -1,5 +1,11 @@
 # Budget-Assist Changelog
 
+## <small>2.0.2 (2025-02-24)</small>
+
+* **ci:** prevent duplicate releases by using semantic version tag ([](https://github.com/lindehoff/Budget-Assist/commit/2daea4fa8cb2a185bc4c1fea69ade947816591f0))
+  * Update upload-release-action to use semantic-release version output instead of github.ref
+* Add 'v' prefix to match semantic-release tag format
+
 ## <small>2.0.1 (2025-02-24)</small>
 
 * **ci:** update release workflow to use semantic versioning correctly ([](https://github.com/lindehoff/Budget-Assist/commit/505304f552e621c43ccb894ac72e95f36572ee9c))
