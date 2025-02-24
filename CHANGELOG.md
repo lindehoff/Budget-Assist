@@ -2,6 +2,27 @@
 
 ## <small>2.0.3 (2025-02-24)</small>
 
+* **release:** 2.0.3 [skip ci] ([](https://github.com/lindehoff/Budget-Assist/commit/2ba03c9e6c5e461a9d398e9708d0684d11e42dfc))
+  ## <small>2.0.3 (2025-02-24)</small>
+
+* **ci:** improve semantic-release version capture and handling ([](https://github.com/lindehoff/Budget-Assist/commit/ade400b9a47742330d9d0a3018cd2240c30eff39))
+  * Add dry-run step to extract next version before actual release
+* Store version in GitHub output for subsequent steps
+* Update conditional checks to use captured version
+* Fix version reference in upload-release-action
+* **ci:** improve semantic-release version capture and handling ([](https://github.com/lindehoff/Budget-Assist/commit/ade400b9a47742330d9d0a3018cd2240c30eff39))
+  * Add dry-run step to extract next version before actual release
+* Store version in GitHub output for subsequent steps
+* Update conditional checks to use captured version
+* Fix version reference in upload-release-action
+* **ci:** switch to official semantic-release action ([](https://github.com/lindehoff/Budget-Assist/commit/7c309126eb08549dd89c7258ff56d344dd710848))
+  * Replace custom semantic-release implementation with cycjimmy/semantic-release-action
+* Update checkout action configuration for better Git credentials handling
+* Fix version tag reference to use semantic-release output variables
+* Remove manual Git configuration as it's handled by the action
+
+## <small>2.0.3 (2025-02-24)</small>
+
 * **ci:** improve semantic-release version capture and handling ([](https://github.com/lindehoff/Budget-Assist/commit/ade400b9a47742330d9d0a3018cd2240c30eff39))
   * Add dry-run step to extract next version before actual release
 * Store version in GitHub output for subsequent steps
