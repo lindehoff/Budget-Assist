@@ -1,5 +1,58 @@
 # Budget-Assist Changelog
 
+## 2.3.0 (2025-02-24)
+
+* **cmd:** ✨ implement category management commands ([](https://github.com/lindehoff/Budget-Assist/commit/a60cb982d7e20c030a5b492d455d32a0afac02c2))
+  Adds CLI commands for managing transaction categories with support for:
+• 📋 List categories with table/JSON output formats
+• ➕ Add new categories with name and description
+• 🔄 Update existing categories (name, description, active status)
+• 🗑️ Soft delete categories with confirmation prompt
+• 🛡️ Custom error handling for category operations
+• 🔧 Utility functions for DB store, AI service, and output formatting
+
+Note: Parent category support and budget/color features are marked as TODO 📝
+* **db:** 🗃️  Add Prompt model and database migrations ([](https://github.com/lindehoff/Budget-Assist/commit/c47ac5037e85ef1b9f6951d2858ae6ad9b322daa))
+  - Add new Prompt model for storing AI prompt templates
+- Add database migrations for Prompt table
+- Implement CRUD operations in SQLStore interface
+- Add robust error handling for database operations
+
+refactor(ai): 🔄 Migrate prompt management to use database storage
+
+- Convert in-memory prompt storage to database-backed system
+- Enhance version increment logic (major.minor.patch)
+- Add mutex locks for concurrent access safety
+- Improve error handling and validation
+
+test(ai): 🧪 Enhance prompt management test coverage
+
+- Add comprehensive test cases for database operations
+- Add concurrent operation tests
+- Improve test error messages with detailed comparisons
+- Update mock implementations for database testing
+
+docs(ai): 📝 Update code documentation
+
+- Add detailed comments for new database methods
+- Update function documentation to reflect database usage
+- Add usage examples in comments
+- Improve error message clarity
+* **ai:** improve prompt template organization and fix tests 🔨 ([](https://github.com/lindehoff/Budget-Assist/commit/5123e199d207e57a9446d0c59d6c1413d4e3e468))
+  * 🏗️ Add new prompt types for better separation of concerns:
+  - TransactionAnalysisPrompt
+  - CategorySuggestionPrompt
+  - Keep existing DocumentExtractionPrompt
+
+* 📝 Update template data structures to match their specific use cases:
+  - Analysis template: Description, Amount, Date fields
+  - Suggestion template: Description, Categories fields
+  - Document template: Content field
+
+* ✅ Fix template execution errors in tests by using correct prompt types
+* 🧪 Add new prompt_manager with comprehensive test coverage
+* 📚 Update implementation documentation in Iteration3-Tasks.md
+
 ## 2.2.0 (2025-02-24)
 
 * 🤖 refactor(ai): update design for OpenAI integration ([](https://github.com/lindehoff/Budget-Assist/commit/a5a3c5ac15b1f823d342d6bd082f65d91b4a2195))
