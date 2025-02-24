@@ -2,22 +2,52 @@ package ai
 
 import (
 	"bytes"
+	"fmt"
 	"text/template"
 	"time"
 )
 
+// PromptType represents different types of prompts
+type PromptType string
+
+const (
+	TransactionCategorizationPrompt PromptType = "transaction_categorization"
+	TransactionAnalysisPrompt       PromptType = "transaction_analysis"
+	CategorySuggestionPrompt        PromptType = "category_suggestion"
+	InvoiceExtractionPrompt         PromptType = "invoice_extraction"
+	ReceiptExtractionPrompt         PromptType = "receipt_extraction"
+	StatementExtractionPrompt       PromptType = "statement_extraction"
+	DocumentExtractionPrompt        PromptType = "document_extraction"
+)
+
 // Example represents a training example for prompt templates
 type Example struct {
-	Input    string
-	Expected string
+	Input     string    `json:"input"`
+	Expected  string    `json:"expected"`
+	CreatedAt time.Time `json:"created_at"`
+	Score     float64   `json:"score,omitempty"`
+}
+
+// Rule represents a prompt rule
+type Rule struct {
+	Description string  `json:"description"`
+	Pattern     string  `json:"pattern,omitempty"`
+	Weight      float64 `json:"weight,omitempty"`
 }
 
 // PromptTemplate defines a template for generating AI prompts
 type PromptTemplate struct {
-	Name     string
-	Template string
-	Examples []Example
-	Rules    []string
+	Type         PromptType `json:"type"`
+	Name         string     `json:"name"`
+	SystemPrompt string     `json:"system_prompt"`
+	UserPrompt   string     `json:"user_prompt"`
+	Examples     []Example  `json:"examples"`
+	Categories   []Category `json:"categories"`
+	Rules        []Rule     `json:"rules"`
+	Version      string     `json:"version"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	IsActive     bool       `json:"is_active"`
 }
 
 // Category represents a transaction category with metadata
@@ -39,88 +69,76 @@ type TrainingExample struct {
 	Confidence  float64   // 8 bytes
 }
 
-// promptTemplates contains our predefined templates for different AI tasks
-var promptTemplates = map[string]PromptTemplate{
-	"categorize": {
-		Name: "Transaction Categorization",
-		Template: `Analyze the following transaction and categorize it:
-Description: {{.Description}}
-Amount: {{.Amount}}
-Date: {{.Date}}
-
-Consider these rules:
-{{range .Rules}}
-- {{.}}{{end}}
-
-Examples of similar transactions:
-{{range .Examples}}
-Input: {{.Input}}
-Category: {{.Expected}}
-{{end}}
-
-Provide the most likely category and a confidence score (0-1).`,
-		Rules: []string{
-			"Focus on the description's key terms",
-			"Consider the transaction amount for context",
-			"Use parent categories when unsure of specifics",
-			"Maintain consistency with similar transactions",
-		},
-	},
-	"extract": {
-		Name: "Document Information Extraction",
-		Template: `Extract key information from the following document:
-{{.Content}}
-
-Focus on:
-- Transaction dates
-- Amount values
-- Account numbers
-- Transaction types
-- Descriptions
-
-Format the output as structured data.`,
-		Rules: []string{
-			"Extract all date formats consistently",
-			"Identify and standardize amount formats",
-			"Preserve original transaction descriptions",
-			"Flag any uncertain extractions",
-		},
-	},
+// Validate checks if the prompt template is valid
+func (pt *PromptTemplate) Validate() error {
+	if pt.Type == "" {
+		return fmt.Errorf("prompt type is required")
+	}
+	if pt.SystemPrompt == "" {
+		return fmt.Errorf("system prompt is required")
+	}
+	if pt.UserPrompt == "" {
+		return fmt.Errorf("user prompt is required")
+	}
+	if pt.Version == "" {
+		return fmt.Errorf("version is required")
+	}
+	return nil
 }
 
-// NewPromptTemplate creates a new prompt template with the given name and content
-func NewPromptTemplate(name, content string) *PromptTemplate {
+// NewPromptTemplate creates a new prompt template with the given type and name
+func NewPromptTemplate(promptType PromptType, name string) *PromptTemplate {
+	now := time.Now()
 	return &PromptTemplate{
-		Name:     name,
-		Template: content,
-		Examples: make([]Example, 0),
-		Rules:    make([]string, 0),
+		Type:      promptType,
+		Name:      name,
+		Version:   "1.0.0",
+		CreatedAt: now,
+		UpdatedAt: now,
+		IsActive:  true,
+		Examples:  make([]Example, 0),
+		Rules:     make([]Rule, 0),
 	}
 }
 
 // AddExample adds a new example to the prompt template
-func (pt *PromptTemplate) AddExample(input, expected string) {
+func (pt *PromptTemplate) AddExample(input, expected string, score float64) {
 	pt.Examples = append(pt.Examples, Example{
-		Input:    input,
-		Expected: expected,
+		Input:     input,
+		Expected:  expected,
+		CreatedAt: time.Now(),
+		Score:     score,
 	})
+	pt.UpdatedAt = time.Now()
 }
 
 // AddRule adds a new rule to the prompt template
-func (pt *PromptTemplate) AddRule(rule string) {
-	pt.Rules = append(pt.Rules, rule)
+func (pt *PromptTemplate) AddRule(description, pattern string, weight float64) {
+	pt.Rules = append(pt.Rules, Rule{
+		Description: description,
+		Pattern:     pattern,
+		Weight:      weight,
+	})
+	pt.UpdatedAt = time.Now()
 }
 
 // Execute generates the final prompt string with the given data
 func (pt *PromptTemplate) Execute(data any) (string, error) {
-	tmpl, err := template.New(pt.Name).Parse(pt.Template)
+	// First validate the template
+	if err := pt.Validate(); err != nil {
+		return "", fmt.Errorf("invalid template: %w", err)
+	}
+
+	// Create a combined template with system and user prompts
+	combinedTemplate := fmt.Sprintf("%s\n\n%s", pt.SystemPrompt, pt.UserPrompt)
+	tmpl, err := template.New(pt.Name).Parse(combinedTemplate)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
 
 	return buf.String(), nil

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -62,10 +63,11 @@ type OpenAIService struct {
 	client      *http.Client
 	config      Config
 	retryConfig RetryConfig
+	promptMgr   *PromptManager
 }
 
 // NewOpenAIService returns a new instance of OpenAIService.
-func NewOpenAIService(config Config) Service {
+func NewOpenAIService(config Config, logger *slog.Logger) Service {
 	return &OpenAIService{
 		client: &http.Client{
 			Timeout: config.RequestTimeout,
@@ -73,16 +75,17 @@ func NewOpenAIService(config Config) Service {
 		config:      config,
 		rateLimiter: NewRateLimiter(10, 30), // 10 requests per second, burst of 30
 		retryConfig: DefaultRetryConfig,
+		promptMgr:   NewPromptManager(logger),
 	}
 }
 
 // AnalyzeTransaction analyzes a transaction using OpenAI's API.
 func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction) (*Analysis, error) {
-	template, ok := promptTemplates["categorize"]
-	if !ok {
+	template, err := s.promptMgr.GetPrompt(ctx, TransactionAnalysisPrompt)
+	if err != nil {
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
-			Err:       ErrTemplateNotFound,
+			Err:       err,
 		}
 	}
 
@@ -90,7 +93,7 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		Description string
 		Amount      string
 		Date        string
-		Rules       []string
+		Rules       []Rule
 		Examples    []Example
 	}{
 		Description: tx.Description,
@@ -113,7 +116,7 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		"messages": []map[string]string{
 			{
 				"role":    "system",
-				"content": "You are a financial transaction analyzer. Analyze transactions and provide categories with confidence scores.",
+				"content": template.SystemPrompt,
 			},
 			{
 				"role":    "user",
@@ -144,11 +147,11 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 		}
 	}
 
-	template, ok := promptTemplates["extract"]
-	if !ok {
+	template, err := s.promptMgr.GetPrompt(ctx, DocumentExtractionPrompt)
+	if err != nil {
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
-			Err:       ErrTemplateNotFound,
+			Err:       err,
 		}
 	}
 
@@ -171,7 +174,7 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 		"messages": []map[string]string{
 			{
 				"role":    "system",
-				"content": "You are a document information extractor. Extract and structure financial information from documents.",
+				"content": template.SystemPrompt,
 			},
 			{
 				"role":    "user",
@@ -195,23 +198,47 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 
 // SuggestCategories suggests categories for a given description using OpenAI's API.
 func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error) {
+	template, err := s.promptMgr.GetPrompt(ctx, CategorySuggestionPrompt)
+	if err != nil {
+		return nil, &OperationError{
+			Operation: "SuggestCategories",
+			Err:       err,
+		}
+	}
+
+	data := struct {
+		Description string
+		Categories  []Category
+	}{
+		Description: desc,
+		Categories:  template.Categories,
+	}
+
+	prompt, err := template.Execute(data)
+	if err != nil {
+		return nil, &OperationError{
+			Operation: "SuggestCategories",
+			Err:       fmt.Errorf("failed to generate prompt: %w", err),
+		}
+	}
+
 	requestPayload := map[string]any{
 		"model": "gpt-4",
 		"messages": []map[string]string{
 			{
 				"role":    "system",
-				"content": "You are a financial transaction categorizer. Suggest relevant categories with confidence scores.",
+				"content": template.SystemPrompt,
 			},
 			{
 				"role":    "user",
-				"content": fmt.Sprintf("Suggest categories for this transaction: %s", desc),
+				"content": prompt,
 			},
 		},
 		"temperature": 0.3,
 	}
 
 	var result []CategoryMatch
-	err := s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
+	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
 	if err != nil {
 		return nil, err
 	}

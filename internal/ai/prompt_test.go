@@ -17,15 +17,32 @@ func TestPromptTemplate_Execute(t *testing.T) {
 		{
 			name: "Successfully_execute_transaction_categorization_template",
 			template: &PromptTemplate{
-				Name: "Test Template",
-				Template: `Analyze the following transaction:
+				Type:         TransactionCategorizationPrompt,
+				Name:         "Test Template",
+				SystemPrompt: "System prompt",
+				UserPrompt: `Analyze the following transaction:
 Description: {{.Description}}
 Amount: {{.Amount}}
 Date: {{.Date}}`,
 				Examples: []Example{
-					{Input: "Grocery shopping", Expected: "Food"},
+					{
+						Input:     "Grocery shopping",
+						Expected:  "Food",
+						CreatedAt: time.Now(),
+						Score:     0.95,
+					},
 				},
-				Rules: []string{"Consider the amount"},
+				Rules: []Rule{
+					{
+						Description: "Consider the amount",
+						Pattern:     "amount > 0",
+						Weight:      1.0,
+					},
+				},
+				Version:   "1.0.0",
+				IsActive:  true,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
 			},
 			data: struct {
 				Description string
@@ -46,8 +63,14 @@ Date: {{.Date}}`,
 		{
 			name: "Error_execute_template_with_invalid_syntax",
 			template: &PromptTemplate{
-				Name:     "Invalid Template",
-				Template: "Invalid {{.Missing}",
+				Type:         TransactionCategorizationPrompt,
+				Name:         "Invalid Template",
+				SystemPrompt: "System prompt",
+				UserPrompt:   "Invalid {{.Missing}",
+				Version:      "1.0.0",
+				IsActive:     true,
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
 			},
 			data:        struct{}{},
 			wantContain: nil,
@@ -77,33 +100,33 @@ Date: {{.Date}}`,
 
 func TestNewPromptTemplate(t *testing.T) {
 	tests := []struct {
-		name    string
-		tplName string
-		content string
+		name       string
+		promptType PromptType
+		tplName    string
 	}{
 		{
-			name:    "Successfully_create_new_prompt_template",
-			tplName: "Test Template",
-			content: "Test content",
+			name:       "Successfully_create_new_prompt_template",
+			promptType: TransactionCategorizationPrompt,
+			tplName:    "Test Template",
 		},
 		{
-			name:    "Successfully_create_template_with_empty_content",
-			tplName: "Empty Template",
-			content: "",
+			name:       "Successfully_create_template_with_empty_name",
+			promptType: DocumentExtractionPrompt,
+			tplName:    "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pt := NewPromptTemplate(tt.tplName, tt.content)
+			pt := NewPromptTemplate(tt.promptType, tt.tplName)
 			if pt == nil {
 				t.Fatal("NewPromptTemplate() returned nil")
 			}
 			if pt.Name != tt.tplName {
 				t.Errorf("NewPromptTemplate().Name = %v, want %v", pt.Name, tt.tplName)
 			}
-			if pt.Template != tt.content {
-				t.Errorf("NewPromptTemplate().Template = %v, want %v", pt.Template, tt.content)
+			if pt.Type != tt.promptType {
+				t.Errorf("NewPromptTemplate().Type = %v, want %v", pt.Type, tt.promptType)
 			}
 			if len(pt.Examples) != 0 {
 				t.Error("NewPromptTemplate().Examples should be empty")
@@ -120,23 +143,26 @@ func TestPromptTemplate_AddExample(t *testing.T) {
 		name     string
 		input    string
 		expected string
+		score    float64
 	}{
 		{
 			name:     "Successfully_add_example_to_template",
 			input:    "test input",
 			expected: "test output",
+			score:    0.95,
 		},
 		{
 			name:     "Successfully_add_example_with_empty_values",
 			input:    "",
 			expected: "",
+			score:    0.0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pt := NewPromptTemplate("Test", "content")
-			pt.AddExample(tt.input, tt.expected)
+			pt := NewPromptTemplate(TransactionCategorizationPrompt, "Test")
+			pt.AddExample(tt.input, tt.expected, tt.score)
 
 			if len(pt.Examples) != 1 {
 				t.Errorf("AddExample() resulted in %d examples, want 1", len(pt.Examples))
@@ -150,37 +176,53 @@ func TestPromptTemplate_AddExample(t *testing.T) {
 			if example.Expected != tt.expected {
 				t.Errorf("AddExample() example.Expected = %v, want %v", example.Expected, tt.expected)
 			}
+			if example.Score != tt.score {
+				t.Errorf("AddExample() example.Score = %v, want %v", example.Score, tt.score)
+			}
 		})
 	}
 }
 
 func TestPromptTemplate_AddRule(t *testing.T) {
 	tests := []struct {
-		name string
-		rule string
+		name        string
+		description string
+		pattern     string
+		weight      float64
 	}{
 		{
-			name: "Successfully_add_rule_to_template",
-			rule: "test rule",
+			name:        "Successfully_add_rule_to_template",
+			description: "test rule",
+			pattern:     "test pattern",
+			weight:      1.0,
 		},
 		{
-			name: "Successfully_add_empty_rule",
-			rule: "",
+			name:        "Successfully_add_rule_with_empty_values",
+			description: "",
+			pattern:     "",
+			weight:      0.0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pt := NewPromptTemplate("Test", "content")
-			pt.AddRule(tt.rule)
+			pt := NewPromptTemplate(TransactionCategorizationPrompt, "Test")
+			pt.AddRule(tt.description, tt.pattern, tt.weight)
 
 			if len(pt.Rules) != 1 {
 				t.Errorf("AddRule() resulted in %d rules, want 1", len(pt.Rules))
 				return
 			}
 
-			if pt.Rules[0] != tt.rule {
-				t.Errorf("AddRule() rule = %v, want %v", pt.Rules[0], tt.rule)
+			rule := pt.Rules[0]
+			if rule.Description != tt.description {
+				t.Errorf("AddRule() rule.Description = %v, want %v", rule.Description, tt.description)
+			}
+			if rule.Pattern != tt.pattern {
+				t.Errorf("AddRule() rule.Pattern = %v, want %v", rule.Pattern, tt.pattern)
+			}
+			if rule.Weight != tt.weight {
+				t.Errorf("AddRule() rule.Weight = %v, want %v", rule.Weight, tt.weight)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,66 @@ func setupMockServer(t *testing.T, response OpenAIResponse, statusCode int, want
 			t.Fatal(err)
 		}
 	}))
+}
+
+func setupTestService(t *testing.T, server *httptest.Server) Service {
+	t.Helper()
+	logger := slog.Default()
+	service := NewOpenAIService(Config{
+		BaseURL:        server.URL,
+		APIKey:         "test-api-key",
+		RequestTimeout: 5 * time.Second,
+	}, logger)
+
+	// Initialize test templates
+	s := service.(*OpenAIService)
+
+	// Template for transaction analysis
+	analysisTemplate := &PromptTemplate{
+		Type:         TransactionAnalysisPrompt,
+		Name:         "Transaction Analysis",
+		SystemPrompt: "You are a financial transaction analyzer. Analyze transactions and provide categories with confidence scores.",
+		UserPrompt:   "Analyze the following transaction:\nDescription: {{.Description}}\nAmount: {{.Amount}}\nDate: {{.Date}}",
+		Version:      "1.0.0",
+		IsActive:     true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := s.promptMgr.UpdatePrompt(context.Background(), analysisTemplate); err != nil {
+		t.Fatalf("Failed to update analysis template: %v", err)
+	}
+
+	// Template for category suggestions
+	suggestionTemplate := &PromptTemplate{
+		Type:         CategorySuggestionPrompt,
+		Name:         "Category Suggestions",
+		SystemPrompt: "You are a financial transaction analyzer. Suggest categories for transactions based on their descriptions.",
+		UserPrompt:   "Suggest categories for the following transaction:\nDescription: {{.Description}}\nCategories:\n{{range .Categories}}- {{.Name}}: {{.Description}}\n{{end}}",
+		Version:      "1.0.0",
+		IsActive:     true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := s.promptMgr.UpdatePrompt(context.Background(), suggestionTemplate); err != nil {
+		t.Fatalf("Failed to update suggestion template: %v", err)
+	}
+
+	// Template for document extraction
+	docTemplate := &PromptTemplate{
+		Type:         DocumentExtractionPrompt,
+		Name:         "Document Extraction",
+		SystemPrompt: "You are a document information extractor. Extract and structure financial information from documents.",
+		UserPrompt:   "Extract key information from the following document:\n{{.Content}}",
+		Version:      "1.0.0",
+		IsActive:     true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := s.promptMgr.UpdatePrompt(context.Background(), docTemplate); err != nil {
+		t.Fatalf("Failed to update document template: %v", err)
+	}
+
+	return service
 }
 
 func TestOpenAIService_Successfully_analyze_transaction(t *testing.T) {
@@ -75,11 +136,7 @@ func TestOpenAIService_Successfully_analyze_transaction(t *testing.T) {
 			})
 			defer server.Close()
 
-			service := NewOpenAIService(Config{
-				BaseURL:        server.URL,
-				APIKey:         "test-api-key",
-				RequestTimeout: 5 * time.Second,
-			})
+			service := setupTestService(t, server)
 
 			got, err := service.AnalyzeTransaction(context.TODO(), tt.transaction)
 			if err != nil {
@@ -140,11 +197,7 @@ func TestOpenAIService_Successfully_extract_document(t *testing.T) {
 			})
 			defer server.Close()
 
-			service := NewOpenAIService(Config{
-				BaseURL:        server.URL,
-				APIKey:         "test-api-key",
-				RequestTimeout: 5 * time.Second,
-			})
+			service := setupTestService(t, server)
 
 			got, err := service.ExtractDocument(context.TODO(), tt.document)
 			if err != nil {
@@ -202,11 +255,7 @@ func TestOpenAIService_Successfully_suggest_categories(t *testing.T) {
 			})
 			defer server.Close()
 
-			service := NewOpenAIService(Config{
-				BaseURL:        server.URL,
-				APIKey:         "test-api-key",
-				RequestTimeout: 5 * time.Second,
-			})
+			service := setupTestService(t, server)
 
 			got, err := service.SuggestCategories(context.TODO(), tt.description)
 			if err != nil {
@@ -292,11 +341,7 @@ func TestOpenAIService_Error_invalid_response(t *testing.T) {
 			})
 			defer server.Close()
 
-			service := NewOpenAIService(Config{
-				BaseURL:        server.URL,
-				APIKey:         "test-api-key",
-				RequestTimeout: 5 * time.Second,
-			})
+			service := setupTestService(t, server)
 
 			tx := &db.Transaction{
 				Amount:          100.50,
@@ -381,12 +426,7 @@ func TestOpenAIService_Error_rate_limit_with_retry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := NewOpenAIService(Config{
-		BaseURL:        server.URL,
-		APIKey:         "test-api-key",
-		RequestTimeout: 5 * time.Second,
-		MaxRetries:     1,
-	})
+	service := setupTestService(t, server)
 
 	categories, err := service.SuggestCategories(context.TODO(), "test")
 	if err != nil {
@@ -406,11 +446,12 @@ func TestOpenAIService_Error_rate_limit_with_retry(t *testing.T) {
 }
 
 func TestOpenAIService_Error_empty_document(t *testing.T) {
-	service := NewOpenAIService(Config{
-		BaseURL:        "http://example.com",
-		APIKey:         "test-api-key",
-		RequestTimeout: 5 * time.Second,
-	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called for empty document")
+	}))
+	defer server.Close()
+
+	service := setupTestService(t, server)
 
 	doc := &Document{
 		Content: []byte{},
