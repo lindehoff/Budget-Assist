@@ -1,41 +1,57 @@
+run:
+  tests: true
+
 linters:
   enable:
-    - gofmt
-    - revive
     - govet
-    - errcheck
-    - staticcheck
-    - gosimple
-    - ineffassign
     - unused
+    - gosimple
+    - staticcheck
+    - ineffassign
+    - typecheck
     - misspell
-    - gocyclo
+    - gofmt
+    - goimports
+    - revive
+    - errcheck
     - gosec
-
-run:
-  timeout: 5m
+    - unconvert
+    - goconst
+    - gocyclo
+    - gocognit
+    - bodyclose
+    - gocritic
+    - godot
+    - godox
+    - goheader
+    - gofumpt
+    - gomodguard
+    - goprintffuncname
+    - noctx
+    - nolintlint
+    - prealloc
+    - rowserrcheck
+    - stylecheck
+    - tparallel
+    - unparam
+    - whitespace
 
 issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
   exclude-rules:
-    - path: internal/db/models\.go
+    - path: _test\.go$
       linters:
         - govet
-      text: "fieldalignment"
-    - path: internal/db/.*_test\.go
+        - testpackage
+        - wsl
+        - lll
+        - gocognit
+        - godox
+        - revive
+        - noctx
+    - path: \.go$
       linters:
-        - govet
-      text: "fieldalignment"
-    - path: internal/db/seed\.go
-      linters:
-        - govet
-      text: "fieldalignment"
-
-linters-settings:
-  gocyclo:
-    min-complexity: 15
-  revive:
-    confidence: 0.8
-  govet:
-    enable-all: true 
+        - godox
+        - godot
+        - revive
+        - gofumpt
+        - nolintlint 

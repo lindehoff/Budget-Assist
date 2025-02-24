@@ -12,16 +12,60 @@ import (
 	db "github.com/lindehoff/Budget-Assist/internal/db"
 )
 
-// OpenAIService implements the AIService interface using OpenAI's API.
+// Common errors
+var (
+	ErrEmptyDocument    = fmt.Errorf("empty document content")
+	ErrNoChoices        = fmt.Errorf("no choices in OpenAI response")
+	ErrEmptyContent     = fmt.Errorf("empty content in OpenAI response")
+	ErrTemplateNotFound = fmt.Errorf("template not found")
+	ErrInvalidOperation = fmt.Errorf("invalid operation")
+)
+
+// OperationError represents an error that occurred during an operation
+type OperationError struct {
+	Err       error
+	Operation string
+	Resource  string
+}
+
+func (e *OperationError) Error() string {
+	if e.Resource != "" {
+		return fmt.Sprintf("%s operation failed for %q: %v", e.Operation, e.Resource, e.Err)
+	}
+	return fmt.Sprintf("%s operation failed: %v", e.Operation, e.Err)
+}
+
+// OpenAIError represents an error from the OpenAI API
+type OpenAIError struct {
+	Operation  string
+	Message    string
+	StatusCode int
+}
+
+func (e *OpenAIError) Error() string {
+	return fmt.Sprintf("OpenAI API error during %s operation (status %d): %s", e.Operation, e.StatusCode, e.Message)
+}
+
+// RateLimitError represents a rate limit error from the OpenAI API
+type RateLimitError struct {
+	Message    string
+	StatusCode int
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("rate limit exceeded (status %d): %s", e.StatusCode, e.Message)
+}
+
+// OpenAIService implements the Service interface using OpenAI's API.
 type OpenAIService struct {
-	rateLimiter *RateLimiter // 8 bytes (pointer)
-	client      *http.Client // 8 bytes (pointer)
-	config      AIConfig     // struct
-	retryConfig RetryConfig  // struct
+	rateLimiter *RateLimiter
+	client      *http.Client
+	config      Config
+	retryConfig RetryConfig
 }
 
 // NewOpenAIService returns a new instance of OpenAIService.
-func NewOpenAIService(config AIConfig) AIService {
+func NewOpenAIService(config Config) Service {
 	return &OpenAIService{
 		client: &http.Client{
 			Timeout: config.RequestTimeout,
@@ -36,7 +80,10 @@ func NewOpenAIService(config AIConfig) AIService {
 func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction) (*Analysis, error) {
 	template, ok := promptTemplates["categorize"]
 	if !ok {
-		return nil, fmt.Errorf("categorization template not found")
+		return nil, &OperationError{
+			Operation: "AnalyzeTransaction",
+			Err:       ErrTemplateNotFound,
+		}
 	}
 
 	data := struct {
@@ -55,7 +102,10 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 
 	prompt, err := template.Execute(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate prompt: %w", err)
+		return nil, &OperationError{
+			Operation: "AnalyzeTransaction",
+			Err:       fmt.Errorf("failed to generate prompt: %w", err),
+		}
 	}
 
 	requestPayload := map[string]any{
@@ -76,7 +126,10 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	var result Analysis
 	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
 	if err != nil {
-		return nil, err
+		return nil, &OperationError{
+			Operation: "AnalyzeTransaction",
+			Err:       err,
+		}
 	}
 
 	return &result, nil
@@ -84,9 +137,19 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 
 // ExtractDocument extracts data from a document using OpenAI's API.
 func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Extraction, error) {
+	if len(doc.Content) == 0 {
+		return nil, &OperationError{
+			Operation: "ExtractDocument",
+			Err:       ErrEmptyDocument,
+		}
+	}
+
 	template, ok := promptTemplates["extract"]
 	if !ok {
-		return nil, fmt.Errorf("extraction template not found")
+		return nil, &OperationError{
+			Operation: "ExtractDocument",
+			Err:       ErrTemplateNotFound,
+		}
 	}
 
 	data := struct {
@@ -97,7 +160,10 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 
 	prompt, err := template.Execute(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate prompt: %w", err)
+		return nil, &OperationError{
+			Operation: "ExtractDocument",
+			Err:       fmt.Errorf("failed to generate prompt: %w", err),
+		}
 	}
 
 	requestPayload := map[string]any{
@@ -118,7 +184,10 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 	var result Extraction
 	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
 	if err != nil {
-		return nil, err
+		return nil, &OperationError{
+			Operation: "ExtractDocument",
+			Err:       err,
+		}
 	}
 
 	return &result, nil
@@ -167,29 +236,78 @@ func (s *OpenAIService) doRequest(ctx context.Context, payload any, out any, end
 	url := s.config.BaseURL + endpoint
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal request payload: %w", err)
+		return &OperationError{
+			Operation: "doRequest",
+			Err:       fmt.Errorf("failed to marshal request payload: %w", err),
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return &OperationError{
+			Operation: "doRequest",
+			Err:       fmt.Errorf("failed to create request: %w", err),
+		}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return &OperationError{
+			Operation: "doRequest",
+			Err:       fmt.Errorf("request failed: %w", err),
+		}
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &OperationError{
+			Operation: "doRequest",
+			Err:       fmt.Errorf("failed to read response body: %w", err),
+		}
 	}
 
-	if err = json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return &RateLimitError{
+			StatusCode: resp.StatusCode,
+			Message:    string(body),
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return &OpenAIError{
+			Operation:  "doRequest",
+			StatusCode: resp.StatusCode,
+			Message:    string(body),
+		}
+	}
+
+	// First decode into a raw OpenAI response to get the content
+	var openAIResp OpenAIResponse
+	if err = json.Unmarshal(body, &openAIResp); err != nil {
+		return &OperationError{
+			Operation: "doRequest",
+			Err:       fmt.Errorf("failed to decode OpenAI response: %w", err),
+		}
+	}
+
+	if len(openAIResp.Choices) == 0 {
+		return ErrNoChoices
+	}
+
+	content := openAIResp.Choices[0].Message.Content
+	if content == "" {
+		return ErrEmptyContent
+	}
+
+	// Now decode the content into the target type
+	if err = json.Unmarshal([]byte(content), out); err != nil {
+		return &OperationError{
+			Operation: "doRequest",
+			Err:       fmt.Errorf("failed to decode response content: %w", err),
+		}
 	}
 
 	return nil
