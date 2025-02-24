@@ -120,6 +120,12 @@ The category can include:
 		}
 
 		fmt.Printf("Successfully created category %q with ID %d\n", cat.Name, cat.ID)
+		fmt.Print("Do you want to create translations for this category? (y/n): ")
+		var response string
+		_, err = fmt.Scanln(&response)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
 		return nil
 	},
 }
@@ -216,7 +222,10 @@ This ensures that historical transactions maintain their categorization.`,
 		if !force {
 			fmt.Printf("Are you sure you want to delete category %q (ID: %d)? [y/N] ", cat.Name, cat.ID)
 			var response string
-			fmt.Scanln(&response)
+			_, err := fmt.Scanln(&response)
+			if err != nil {
+				return fmt.Errorf("failed to read response: %w", err)
+			}
 			if response != "y" && response != "Y" {
 				fmt.Println("Operation cancelled")
 				return nil

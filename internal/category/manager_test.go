@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,6 +93,18 @@ func (m *mockStore) GetCategoryTypeByID(_ context.Context, id uint) (*db.Categor
 	return nil, db.ErrNotFound
 }
 
+func (m *mockStore) GetPromptByType(_ context.Context, promptType string) (*db.Prompt, error) {
+	return nil, nil
+}
+
+func (m *mockStore) UpdatePrompt(_ context.Context, prompt *db.Prompt) error {
+	return nil
+}
+
+func (m *mockStore) ListPrompts(_ context.Context) ([]db.Prompt, error) {
+	return nil, nil
+}
+
 type mockAIService struct{}
 
 func (m *mockAIService) AnalyzeTransaction(_ context.Context, _ *db.Transaction) (*ai.Analysis, error) {
@@ -153,6 +166,13 @@ func createTestCategory(t *testing.T, store db.Store, name string, typeID uint) 
 }
 
 func TestCreateCategory(t *testing.T) {
+	// TODO: Replace context.Background() with proper context handling to test timeouts
+	// and cancellation in a future improvement. This should include:
+	// - Testing with context timeout
+	// - Testing with context cancellation
+	// - Testing with parent context values
+	ctx := context.TODO()
+
 	manager, _ := createTestManager(t)
 
 	tests := []struct {
@@ -207,48 +227,60 @@ func TestCreateCategory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			category, err := manager.CreateCategory(context.Background(), tt.req)
+			category, err := manager.CreateCategory(ctx, tt.req)
 
-			// Validate error cases
+			// Validate error cases with detailed messages
 			if (err != nil) != tt.wantErr {
-				t.Errorf("CreateCategory() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("CreateCategory(%+v) error = %v, wantErr = %v",
+					tt.req, err, tt.wantErr)
 				return
 			}
 			if tt.wantErr {
 				var categoryErr CategoryError
 				if !errors.As(err, &categoryErr) {
-					t.Errorf("CreateCategory() error type = %T, want CategoryError", err)
+					t.Errorf("CreateCategory(%+v) error type = %T, want CategoryError\nGot error: %v",
+						tt.req, err, err)
 					return
 				}
 				if tt.expectedErr != nil && categoryErr.Err.Error() != tt.expectedErr.Error() {
-					t.Errorf("CreateCategory() error = %v, expectedErr %v", categoryErr.Err, tt.expectedErr)
+					t.Errorf("CreateCategory(%+v) error message:\ngot:  %v\nwant: %v",
+						tt.req, categoryErr.Err, tt.expectedErr)
 				}
 				return
 			}
 
-			// Validate success cases
+			// Validate success cases with detailed field comparison
 			if category == nil {
-				t.Fatal("CreateCategory() returned nil category when no error expected")
+				t.Fatalf("CreateCategory(%+v) returned nil category when no error expected", tt.req)
 			}
 
-			// Validate category fields
 			if category.Name != tt.req.Name {
-				t.Errorf("CreateCategory() category name = %v, want %v", category.Name, tt.req.Name)
+				t.Errorf("CreateCategory(%+v) category name:\ngot:  %v\nwant: %v",
+					tt.req, category.Name, tt.req.Name)
 			}
 			if category.Description != tt.req.Description {
-				t.Errorf("CreateCategory() category description = %v, want %v", category.Description, tt.req.Description)
+				t.Errorf("CreateCategory(%+v) category description:\ngot:  %v\nwant: %v",
+					tt.req, category.Description, tt.req.Description)
 			}
 			if category.TypeID != tt.req.TypeID {
-				t.Errorf("CreateCategory() category typeID = %v, want %v", category.TypeID, tt.req.TypeID)
+				t.Errorf("CreateCategory(%+v) category typeID:\ngot:  %v\nwant: %v",
+					tt.req, category.TypeID, tt.req.TypeID)
 			}
 			if !category.IsActive {
-				t.Error("CreateCategory() category should be active by default")
+				t.Errorf("CreateCategory(%+v) category isActive = false, want true", tt.req)
 			}
 		})
 	}
 }
 
 func TestUpdateCategory(t *testing.T) {
+	// TODO: Replace context.Background() with proper context handling to test timeouts
+	// and cancellation in a future improvement. This should include:
+	// - Testing with context timeout
+	// - Testing with context cancellation
+	// - Testing with parent context values
+	ctx := context.TODO()
+
 	manager, store := createTestManager(t)
 	existingCategory := createTestCategory(t, store, "Original", 1)
 
@@ -289,45 +321,59 @@ func TestUpdateCategory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			category, err := manager.UpdateCategory(context.Background(), tt.id, tt.req)
+			category, err := manager.UpdateCategory(ctx, tt.id, tt.req)
 
-			// Validate error cases
+			// Validate error cases with detailed messages
 			if (err != nil) != tt.wantErr {
-				t.Errorf("UpdateCategory() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("UpdateCategory(id=%d, %+v) error = %v, wantErr = %v",
+					tt.id, tt.req, err, tt.wantErr)
 				return
 			}
 			if tt.wantErr {
 				var categoryErr CategoryError
 				if !errors.As(err, &categoryErr) {
-					t.Errorf("UpdateCategory() error type = %T, want CategoryError", err)
+					t.Errorf("UpdateCategory(id=%d, %+v) error type = %T, want CategoryError\nGot error: %v",
+						tt.id, tt.req, err, err)
 					return
 				}
 				if tt.expectedErr != nil && !errors.Is(categoryErr.Err, tt.expectedErr) {
-					t.Errorf("UpdateCategory() error = %v, expectedErr %v", categoryErr.Err, tt.expectedErr)
+					t.Errorf("UpdateCategory(id=%d, %+v) error:\ngot:  %v\nwant: %v",
+						tt.id, tt.req, categoryErr.Err, tt.expectedErr)
 				}
 				return
 			}
 
-			// Validate success cases
+			// Validate success cases with detailed field comparison
 			if category == nil {
-				t.Fatal("UpdateCategory() returned nil category when no error expected")
+				t.Fatalf("UpdateCategory(id=%d, %+v) returned nil category when no error expected",
+					tt.id, tt.req)
+				return
 			}
 
-			// Validate updated fields
 			if tt.req.Name != "" && category.Name != tt.req.Name {
-				t.Errorf("UpdateCategory() category name = %v, want %v", category.Name, tt.req.Name)
+				t.Errorf("UpdateCategory(id=%d, %+v) category name:\ngot:  %v\nwant: %v",
+					tt.id, tt.req, category.Name, tt.req.Name)
 			}
 			if tt.req.Description != "" && category.Description != tt.req.Description {
-				t.Errorf("UpdateCategory() category description = %v, want %v", category.Description, tt.req.Description)
+				t.Errorf("UpdateCategory(id=%d, %+v) category description:\ngot:  %v\nwant: %v",
+					tt.id, tt.req, category.Description, tt.req.Description)
 			}
 			if tt.req.IsActive != nil && category.IsActive != *tt.req.IsActive {
-				t.Errorf("UpdateCategory() category isActive = %v, want %v", category.IsActive, *tt.req.IsActive)
+				t.Errorf("UpdateCategory(id=%d, %+v) category isActive:\ngot:  %v\nwant: %v",
+					tt.id, tt.req, category.IsActive, *tt.req.IsActive)
 			}
 		})
 	}
 }
 
 func TestSuggestCategory(t *testing.T) {
+	// TODO: Replace context.Background() with proper context handling to test timeouts
+	// and cancellation in a future improvement. This should include:
+	// - Testing with context timeout
+	// - Testing with context cancellation
+	// - Testing with parent context values
+	ctx := context.TODO()
+
 	manager, _ := createTestManager(t)
 
 	tests := []struct {
@@ -358,30 +404,36 @@ func TestSuggestCategory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			suggestions, err := manager.SuggestCategory(context.Background(), tt.description)
+			suggestions, err := manager.SuggestCategory(ctx, tt.description)
 
-			// Validate error cases
+			// Validate error cases with descriptive messages
 			if (err != nil) != tt.wantErr {
-				t.Errorf("SuggestCategory() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("SuggestCategory(%q) error = %v, wantErr = %v",
+					tt.description, err, tt.wantErr)
 				return
 			}
 			if tt.wantErr {
 				return
 			}
 
-			// Validate success cases
-			if len(suggestions) != tt.expectedCount {
-				t.Errorf("SuggestCategory() got %d suggestions, want %d", len(suggestions), tt.expectedCount)
+			// Validate success cases with detailed output
+			if got := len(suggestions); got != tt.expectedCount {
+				t.Errorf("SuggestCategory(%q) returned %d suggestions, want %d\nGot suggestions: %+v",
+					tt.description, got, tt.expectedCount, suggestions)
 				return
 			}
 
-			// Validate suggestions
+			// Validate suggestions with detailed comparison
 			for i, suggestion := range suggestions {
 				if suggestion.CategoryPath != tt.expectedPaths[i] {
-					t.Errorf("SuggestCategory() category[%d] = %v, want %v", i, suggestion.CategoryPath, tt.expectedPaths[i])
+					t.Errorf("SuggestCategory(%q) category[%d]:\ngot:  %v\nwant: %v",
+						tt.description, i, suggestion.CategoryPath, tt.expectedPaths[i])
+					return
 				}
 				if suggestion.Confidence < tt.minConfidence {
-					t.Errorf("SuggestCategory() confidence[%d] = %v, want >= %v", i, suggestion.Confidence, tt.minConfidence)
+					t.Errorf("SuggestCategory(%q) confidence[%d] = %.2f, want >= %.2f",
+						tt.description, i, suggestion.Confidence, tt.minConfidence)
+					return
 				}
 			}
 		})
@@ -619,5 +671,122 @@ func TestSuggestCategory_Error(t *testing.T) {
 
 	if categoryErr.Operation != "suggest" {
 		t.Errorf("SuggestCategory() error operation = %v, want 'suggest'", categoryErr.Operation)
+	}
+}
+
+// TestConcurrent_category_operations tests the manager's behavior under concurrent load
+func TestConcurrent_category_operations(t *testing.T) {
+	manager, _ := createTestManager(t)
+
+	// Number of concurrent operations
+	numOperations := 10
+	var wg sync.WaitGroup
+	wg.Add(numOperations * 2) // For both create and update operations
+
+	// Channel to collect errors
+	errCh := make(chan error, numOperations*2)
+
+	// Create categories concurrently
+	categories := make([]*db.Category, numOperations)
+	for i := 0; i < numOperations; i++ {
+		go func(i int) {
+			defer wg.Done()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+
+			req := CreateCategoryRequest{
+				Name:        fmt.Sprintf("Category %d", i),
+				Description: fmt.Sprintf("Test category %d", i),
+				TypeID:      1,
+				Translations: map[string]TranslationData{
+					"sv": {
+						Name:        fmt.Sprintf("Kategori %d", i),
+						Description: fmt.Sprintf("Test kategori %d", i),
+					},
+				},
+			}
+
+			category, err := manager.CreateCategory(ctx, req)
+			if err != nil {
+				errCh <- fmt.Errorf("create operation %d failed: %w", i, err)
+				return
+			}
+			categories[i] = category
+		}(i)
+	}
+
+	// Update categories concurrently
+	for i := 0; i < numOperations; i++ {
+		go func(i int) {
+			defer wg.Done()
+
+			// Wait a bit to ensure category is created
+			time.Sleep(10 * time.Millisecond)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+
+			// Try updating until category is available
+			var lastErr error
+			for retries := 0; retries < 3; retries++ {
+				if categories[i] == nil {
+					time.Sleep(10 * time.Millisecond)
+					continue
+				}
+
+				req := UpdateCategoryRequest{
+					Name:        fmt.Sprintf("Updated Category %d", i),
+					Description: fmt.Sprintf("Updated description %d", i),
+				}
+
+				_, err := manager.UpdateCategory(ctx, categories[i].ID, req)
+				if err == nil {
+					return
+				}
+				lastErr = err
+				time.Sleep(10 * time.Millisecond)
+			}
+			if lastErr != nil {
+				errCh <- fmt.Errorf("update operation %d failed after retries: %w", i, lastErr)
+			}
+		}(i)
+	}
+
+	// Wait for all operations to complete
+	wg.Wait()
+	close(errCh)
+
+	// Check for any errors
+	errors := make([]error, 0, numOperations*2)
+	for err := range errCh {
+		errors = append(errors, err)
+	}
+
+	if len(errors) > 0 {
+		t.Errorf("Got %d errors from concurrent operations:", len(errors))
+		for _, err := range errors {
+			t.Errorf("  %v", err)
+		}
+	}
+
+	// Verify final state
+	ctx := context.Background()
+	for i := 0; i < numOperations; i++ {
+		if categories[i] == nil {
+			t.Errorf("Category %d was not created", i)
+			continue
+		}
+
+		category, err := manager.GetCategoryByID(ctx, categories[i].ID)
+		if err != nil {
+			t.Errorf("Failed to get category %d: %v", i, err)
+			continue
+		}
+
+		expectedName := fmt.Sprintf("Updated Category %d", i)
+		if category.Name != expectedName {
+			t.Errorf("Category %d name = %q, want %q", i, category.Name, expectedName)
+		}
 	}
 }

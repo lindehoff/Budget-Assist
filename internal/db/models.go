@@ -187,3 +187,18 @@ const (
 	PeriodMonthly = "monthly"
 	PeriodYearly  = "yearly"
 )
+
+// Prompt represents an AI prompt template
+type Prompt struct {
+	gorm.Model
+	Type         string    `gorm:"not null;size:50"`
+	Name         string    `gorm:"not null;size:100"`
+	SystemPrompt string    `gorm:"not null;type:text"`
+	UserPrompt   string    `gorm:"not null;type:text"`
+	Examples     string    `gorm:"type:text"` // JSON string of examples
+	Rules        string    `gorm:"type:text"` // JSON string of rules
+	Version      string    `gorm:"not null;size:20"`
+	IsActive     bool      `gorm:"not null"`
+	CreatedAt    time.Time `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
+}

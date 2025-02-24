@@ -9,6 +9,7 @@ import (
 	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/lindehoff/Budget-Assist/internal/db"
 	"github.com/olekukonko/tablewriter"
+	"github.com/spf13/viper"
 )
 
 // getStore returns a new database store instance
@@ -29,15 +30,19 @@ func getStore() (db.Store, error) {
 
 // getAIService returns a new AI service instance
 func getAIService() (ai.Service, error) {
-	// TODO: Get configuration from viper
 	config := ai.Config{
 		BaseURL:        "https://api.openai.com",
-		APIKey:         os.Getenv("OPENAI_API_KEY"),
-		RequestTimeout: 30,
+		APIKey:         viper.GetString("ai.api_key"),
+		RequestTimeout: viper.GetDuration("ai.timeout"),
 		MaxRetries:     3,
 	}
 
-	return ai.NewOpenAIService(config, slog.Default()), nil
+	store, err := getStore()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize store: %w", err)
+	}
+
+	return ai.NewOpenAIService(config, store, slog.Default()), nil
 }
 
 // printJSON prints data as formatted JSON

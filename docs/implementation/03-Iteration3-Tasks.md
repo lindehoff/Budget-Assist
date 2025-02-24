@@ -114,12 +114,27 @@ Implementing AI capabilities using OpenAI's API for intelligent transaction cate
       Categories   []Category
       Rules        []Rule
       Version      string
+      IsActive     bool
+      CreatedAt    time.Time
+      UpdatedAt    time.Time
   }
   ```
 - [x] Create prompt versioning
+  - [x] Implement major.minor.patch versioning
+  - [x] Auto-increment version on updates
+  - [x] Handle version transitions (1.0.9 -> 1.1.0)
 - [x] Add prompt testing
+  - [x] Comprehensive test coverage
+  - [x] Concurrent operation testing
+  - [x] Error case validation
 - [x] Implement prompt validation
+  - [x] Database persistence
+  - [x] Cache management
+  - [x] Active/inactive state handling
 - [x] Create example management
+  - [x] JSON storage for examples
+  - [x] JSON storage for rules
+  - [x] Proper error handling for JSON operations
 
 ### 5. CLI Tool Development 🔄
 - [x] Create category management commands
@@ -216,7 +231,7 @@ Implementing AI capabilities using OpenAI's API for intelligent transaction cate
 - [x] Basic categorization working
 - [x] Category management implemented
 - [ ] CLI tool functional
-- [ ] Prompt management working
+- [x] Prompt management working
 - [ ] Response caching implemented
 - [ ] Fallbacks tested
 - [x] Documentation updated
@@ -226,6 +241,7 @@ Implementing AI capabilities using OpenAI's API for intelligent transaction cate
 - [ ] Storage integration complete
 - [ ] Batch processing functional
 - [ ] Export functionality working
+- [x] Prompt management working
 
 ## Success Criteria
 1. [ ] Categorization accuracy > 90% (using GPT-4)
@@ -235,7 +251,7 @@ Implementing AI capabilities using OpenAI's API for intelligent transaction cate
 5. [x] Test coverage > 80%
 6. [ ] CLI commands implemented and tested
 7. [x] Category management working
-8. [ ] Prompt management operational
+8. [x] Prompt management operational
 9. [ ] PDF processing accuracy > 85%
 10. [ ] Document processing time < 30 seconds
 11. [ ] Storage integration tested
@@ -337,7 +353,7 @@ type CategorySuggestion struct {
 - [x] Consider privacy implications
 - [ ] Plan for model updates
 - [ ] Document CLI usage
-- [ ] Create example prompts
+- [x] Create example prompts
 - [ ] Test with various document types
 - [ ] Test with various PDF formats
 - [ ] Implement proper error handling for PDF processing

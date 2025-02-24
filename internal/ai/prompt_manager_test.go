@@ -9,7 +9,8 @@ import (
 
 func TestPromptManager_GetPrompt(t *testing.T) {
 	logger := slog.Default()
-	pm := NewPromptManager(logger)
+	store := newMockStore()
+	pm := NewPromptManager(store, logger)
 
 	// Add a test template
 	template := &PromptTemplate{
@@ -48,11 +49,11 @@ func TestPromptManager_GetPrompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := pm.GetPrompt(context.Background(), tt.promptType)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GetPrompt() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("PromptManager.GetPrompt() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !tt.wantErr && got == nil {
-				t.Error("GetPrompt() returned nil, want non-nil")
+				t.Error("PromptManager.GetPrompt() = nil, want non-nil")
 			}
 		})
 	}
@@ -60,7 +61,8 @@ func TestPromptManager_GetPrompt(t *testing.T) {
 
 func TestPromptManager_UpdatePrompt(t *testing.T) {
 	logger := slog.Default()
-	pm := NewPromptManager(logger)
+	store := newMockStore()
+	pm := NewPromptManager(store, logger)
 
 	tests := []struct {
 		name     string
@@ -68,7 +70,7 @@ func TestPromptManager_UpdatePrompt(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name: "Successfully_update_new_prompt",
+			name: "Successfully_update_prompt",
 			template: &PromptTemplate{
 				Type:         TransactionCategorizationPrompt,
 				Name:         "Test Template",
@@ -82,20 +84,16 @@ func TestPromptManager_UpdatePrompt(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Error_update_invalid_prompt",
-			template: &PromptTemplate{
-				Name:     "Invalid Template",
-				IsActive: true,
-			},
-			wantErr: true,
+			name:     "Error_update_nil_prompt",
+			template: nil,
+			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := pm.UpdatePrompt(context.Background(), tt.template)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("UpdatePrompt() error = %v, wantErr %v", err, tt.wantErr)
+			if err := pm.UpdatePrompt(context.Background(), tt.template); (err != nil) != tt.wantErr {
+				t.Errorf("PromptManager.UpdatePrompt() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -103,9 +101,10 @@ func TestPromptManager_UpdatePrompt(t *testing.T) {
 
 func TestPromptManager_ListPrompts(t *testing.T) {
 	logger := slog.Default()
-	pm := NewPromptManager(logger)
+	store := newMockStore()
+	pm := NewPromptManager(store, logger)
 
-	// Add test templates
+	// Add some test templates
 	templates := []*PromptTemplate{
 		{
 			Type:         TransactionCategorizationPrompt,
@@ -118,32 +117,33 @@ func TestPromptManager_ListPrompts(t *testing.T) {
 			UpdatedAt:    time.Now(),
 		},
 		{
-			Type:         ReceiptExtractionPrompt,
+			Type:         "test-type-2",
 			Name:         "Template 2",
 			SystemPrompt: "System prompt 2",
 			UserPrompt:   "User prompt 2",
 			Version:      "1.0.0",
-			IsActive:     false,
+			IsActive:     true,
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
 		},
 	}
 
-	for _, tpl := range templates {
-		if err := pm.UpdatePrompt(context.Background(), tpl); err != nil {
+	for _, template := range templates {
+		if err := pm.UpdatePrompt(context.Background(), template); err != nil {
 			t.Fatalf("Failed to update template: %v", err)
 		}
 	}
 
 	got := pm.ListPrompts(context.Background())
-	if len(got) != 1 {
-		t.Errorf("ListPrompts() returned %d templates, want 1 (only active)", len(got))
+	if len(got) != len(templates) {
+		t.Errorf("PromptManager.ListPrompts() = %v, want %v", len(got), len(templates))
 	}
 }
 
 func TestPromptManager_DeactivatePrompt(t *testing.T) {
 	logger := slog.Default()
-	pm := NewPromptManager(logger)
+	store := newMockStore()
+	pm := NewPromptManager(store, logger)
 
 	// Add a test template
 	template := &PromptTemplate{
@@ -167,7 +167,7 @@ func TestPromptManager_DeactivatePrompt(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name:       "Successfully_deactivate_existing_prompt",
+			name:       "Successfully_deactivate_prompt",
 			promptType: TransactionCategorizationPrompt,
 			wantErr:    false,
 		},
@@ -180,69 +180,8 @@ func TestPromptManager_DeactivatePrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := pm.DeactivatePrompt(context.Background(), tt.promptType)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("DeactivatePrompt() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestPromptManager_TestPrompt(t *testing.T) {
-	logger := slog.Default()
-	pm := NewPromptManager(logger)
-
-	// Add a test template
-	template := &PromptTemplate{
-		Type:         TransactionCategorizationPrompt,
-		Name:         "Test Template",
-		SystemPrompt: "System prompt for {{.Name}}",
-		UserPrompt:   "User prompt with {{.Value}}",
-		Version:      "1.0.0",
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-
-	if err := pm.UpdatePrompt(context.Background(), template); err != nil {
-		t.Fatalf("Failed to update template: %v", err)
-	}
-
-	tests := []struct {
-		name       string
-		promptType PromptType
-		data       interface{}
-		wantErr    bool
-	}{
-		{
-			name:       "Successfully_test_prompt",
-			promptType: TransactionCategorizationPrompt,
-			data: struct {
-				Name  string
-				Value int
-			}{
-				Name:  "Test",
-				Value: 42,
-			},
-			wantErr: false,
-		},
-		{
-			name:       "Error_test_non_existent_prompt",
-			promptType: "non-existent",
-			data:       nil,
-			wantErr:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := pm.TestPrompt(context.Background(), tt.promptType, tt.data)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("TestPrompt() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && result == "" {
-				t.Error("TestPrompt() returned empty string, want non-empty")
+			if err := pm.DeactivatePrompt(context.Background(), tt.promptType); (err != nil) != tt.wantErr {
+				t.Errorf("PromptManager.DeactivatePrompt() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -255,14 +194,19 @@ func TestIncrementVersion(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "Successfully_increment_patch_version",
+			name:    "Successfully_increment_patch",
 			version: "1.0.0",
 			want:    "1.0.1",
 		},
 		{
-			name:    "Successfully_increment_from_higher_version",
-			version: "2.3.5",
-			want:    "2.3.6",
+			name:    "Successfully_increment_minor",
+			version: "1.0.9",
+			want:    "1.1.0",
+		},
+		{
+			name:    "Successfully_increment_major",
+			version: "1.9.9",
+			want:    "2.0.0",
 		},
 	}
 

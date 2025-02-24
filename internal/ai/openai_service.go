@@ -67,15 +67,15 @@ type OpenAIService struct {
 }
 
 // NewOpenAIService returns a new instance of OpenAIService.
-func NewOpenAIService(config Config, logger *slog.Logger) Service {
+func NewOpenAIService(config Config, store db.Store, logger *slog.Logger) *OpenAIService {
 	return &OpenAIService{
+		rateLimiter: NewRateLimiter(10, 20), // 10 RPS with burst of 20
 		client: &http.Client{
-			Timeout: config.RequestTimeout,
+			Timeout: config.RequestTimeout * time.Second,
 		},
 		config:      config,
-		rateLimiter: NewRateLimiter(10, 30), // 10 requests per second, burst of 30
 		retryConfig: DefaultRetryConfig,
-		promptMgr:   NewPromptManager(logger),
+		promptMgr:   NewPromptManager(store, logger),
 	}
 }
 
@@ -83,6 +83,12 @@ func NewOpenAIService(config Config, logger *slog.Logger) Service {
 func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction) (*Analysis, error) {
 	template, err := s.promptMgr.GetPrompt(ctx, TransactionAnalysisPrompt)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, &OperationError{
+				Operation: "AnalyzeTransaction",
+				Err:       ctx.Err(),
+			}
+		}
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       err,
@@ -98,7 +104,7 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	}{
 		Description: tx.Description,
 		Amount:      fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency),
-		Date:        tx.TransactionDate.Format(time.RFC3339),
+		Date:        tx.TransactionDate.Format("2006-01-02"),
 		Rules:       template.Rules,
 		Examples:    template.Examples,
 	}
@@ -107,7 +113,7 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
-			Err:       fmt.Errorf("failed to generate prompt: %w", err),
+			Err:       fmt.Errorf("failed to execute template: %w", err),
 		}
 	}
 
@@ -129,6 +135,12 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	var result Analysis
 	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, &OperationError{
+				Operation: "AnalyzeTransaction",
+				Err:       ctx.Err(),
+			}
+		}
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       err,
@@ -198,7 +210,7 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 
 // SuggestCategories suggests categories for a given description using OpenAI's API.
 func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error) {
-	template, err := s.promptMgr.GetPrompt(ctx, CategorySuggestionPrompt)
+	template, err := s.promptMgr.GetPrompt(ctx, TransactionCategorizationPrompt)
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "SuggestCategories",
@@ -248,41 +260,88 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 
 // doRequestWithRetry performs an HTTP request with retry and rate limiting
 func (s *OpenAIService) doRequestWithRetry(ctx context.Context, payload any, out any, endpoint string) error {
-	op := func() error {
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			return fmt.Errorf("rate limiter wait failed: %w", err)
+	maxRetries := 3
+	backoff := 1 * time.Second
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if err := s.makeRequest(ctx, payload, out, endpoint); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return &OperationError{
+					Operation: "doRequestWithRetry",
+					Err:       ctx.Err(),
+				}
+			}
+
+			// If it's a rate limit error and we have retries left, wait and try again
+			if _, isRateLimit := err.(*RateLimitError); isRateLimit && attempt < maxRetries-1 {
+				select {
+				case <-ctx.Done():
+					return &OperationError{
+						Operation: "doRequestWithRetry",
+						Err:       ctx.Err(),
+					}
+				case <-time.After(backoff * time.Duration(attempt+1)):
+					continue
+				}
+			}
+
+			return err
 		}
-		return s.doRequest(ctx, payload, out, endpoint)
+
+		return nil
 	}
 
-	return retryWithBackoff(ctx, s.retryConfig, op)
+	return &OperationError{
+		Operation: "doRequestWithRetry",
+		Err:       fmt.Errorf("max retries exceeded"),
+	}
 }
 
-// doRequest is a helper method to perform an HTTP POST request to the OpenAI API.
-func (s *OpenAIService) doRequest(ctx context.Context, payload any, out any, endpoint string) error {
+// makeRequest performs a single HTTP request to the OpenAI API
+func (s *OpenAIService) makeRequest(ctx context.Context, payload any, out any, endpoint string) error {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &OperationError{
+				Operation: "makeRequest",
+				Err:       ctx.Err(),
+			}
+		}
+		return &OperationError{
+			Operation: "makeRequest",
+			Err:       fmt.Errorf("rate limit wait failed: %w", err),
+		}
+	}
+
 	url := s.config.BaseURL + endpoint
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return &OperationError{
-			Operation: "doRequest",
-			Err:       fmt.Errorf("failed to marshal request payload: %w", err),
+			Operation: "makeRequest",
+			Err:       fmt.Errorf("failed to marshal request: %w", err),
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return &OperationError{
-			Operation: "doRequest",
+			Operation: "makeRequest",
 			Err:       fmt.Errorf("failed to create request: %w", err),
 		}
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &OperationError{
+				Operation: "makeRequest",
+				Err:       ctx.Err(),
+			}
+		}
 		return &OperationError{
-			Operation: "doRequest",
+			Operation: "makeRequest",
 			Err:       fmt.Errorf("request failed: %w", err),
 		}
 	}
@@ -291,48 +350,59 @@ func (s *OpenAIService) doRequest(ctx context.Context, payload any, out any, end
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return &OperationError{
-			Operation: "doRequest",
+			Operation: "makeRequest",
 			Err:       fmt.Errorf("failed to read response body: %w", err),
 		}
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return &RateLimitError{
+			Message:    "rate limit exceeded",
 			StatusCode: resp.StatusCode,
-			Message:    string(body),
 		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		return &OpenAIError{
-			Operation:  "doRequest",
-			StatusCode: resp.StatusCode,
+			Operation:  "makeRequest",
 			Message:    string(body),
+			StatusCode: resp.StatusCode,
 		}
 	}
 
-	// First decode into a raw OpenAI response to get the content
-	var openAIResp OpenAIResponse
-	if err = json.Unmarshal(body, &openAIResp); err != nil {
+	var response struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return &OperationError{
-			Operation: "doRequest",
-			Err:       fmt.Errorf("failed to decode OpenAI response: %w", err),
+			Operation: "makeRequest",
+			Err:       fmt.Errorf("failed to decode response content: %w", err),
 		}
 	}
 
-	if len(openAIResp.Choices) == 0 {
-		return ErrNoChoices
+	if len(response.Choices) == 0 {
+		return &OperationError{
+			Operation: "makeRequest",
+			Err:       ErrNoChoices,
+		}
 	}
 
-	content := openAIResp.Choices[0].Message.Content
+	content := response.Choices[0].Message.Content
 	if content == "" {
-		return ErrEmptyContent
+		return &OperationError{
+			Operation: "makeRequest",
+			Err:       ErrEmptyContent,
+		}
 	}
 
-	// Now decode the content into the target type
-	if err = json.Unmarshal([]byte(content), out); err != nil {
+	if err := json.Unmarshal([]byte(content), out); err != nil {
 		return &OperationError{
-			Operation: "doRequest",
+			Operation: "makeRequest",
 			Err:       fmt.Errorf("failed to decode response content: %w", err),
 		}
 	}

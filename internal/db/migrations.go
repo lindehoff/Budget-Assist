@@ -16,5 +16,6 @@ func runMigrations(db *gorm.DB) error {
 		&Budget{},
 		&Report{},
 		&Translation{},
+		&Prompt{},
 	)
 }

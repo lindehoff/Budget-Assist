@@ -18,6 +18,11 @@ type Store interface {
 	CreateTranslation(ctx context.Context, translation *Translation) error
 	GetTranslations(ctx context.Context, entityID uint, entityType string) ([]Translation, error)
 	DeleteCategory(ctx context.Context, id uint) error
+
+	// Prompt-related methods
+	GetPromptByType(ctx context.Context, promptType string) (*Prompt, error)
+	UpdatePrompt(ctx context.Context, prompt *Prompt) error
+	ListPrompts(ctx context.Context) ([]Prompt, error)
 }
 
 // SQLStore implements Store interface using GORM
@@ -142,4 +147,58 @@ func (s *SQLStore) GetTranslations(ctx context.Context, entityID uint, entityTyp
 		return nil, fmt.Errorf("failed to get translations: %w", result.Error)
 	}
 	return translations, nil
+}
+
+// GetPromptByType retrieves a prompt template by its type
+func (s *SQLStore) GetPromptByType(ctx context.Context, promptType string) (*Prompt, error) {
+	var prompt Prompt
+	result := s.db.WithContext(ctx).
+		Where("type = ? AND is_active = ?", promptType, true).
+		First(&prompt)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("prompt template not found for type: %s", promptType)
+		}
+		return nil, fmt.Errorf("failed to get prompt: %w", result.Error)
+	}
+	return &prompt, nil
+}
+
+// UpdatePrompt updates or creates a prompt template
+func (s *SQLStore) UpdatePrompt(ctx context.Context, prompt *Prompt) error {
+	// Check if prompt exists
+	var existing Prompt
+	result := s.db.WithContext(ctx).
+		Where("type = ?", prompt.Type).
+		First(&existing)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			// Create new prompt
+			result = s.db.WithContext(ctx).Create(prompt)
+			if result.Error != nil {
+				return fmt.Errorf("failed to create prompt: %w", result.Error)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to check existing prompt: %w", result.Error)
+	}
+
+	// Update existing prompt
+	prompt.ID = existing.ID
+	result = s.db.WithContext(ctx).Save(prompt)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update prompt: %w", result.Error)
+	}
+	return nil
+}
+
+// ListPrompts returns all prompt templates
+func (s *SQLStore) ListPrompts(ctx context.Context) ([]Prompt, error) {
+	var prompts []Prompt
+	result := s.db.WithContext(ctx).Find(&prompts)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list prompts: %w", result.Error)
+	}
+	return prompts, nil
 }
