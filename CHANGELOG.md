@@ -1,5 +1,68 @@
 # Budget-Assist Changelog
 
+## 2.2.0 (2025-02-24)
+
+* 🤖 refactor(ai): update design for OpenAI integration ([](https://github.com/lindehoff/Budget-Assist/commit/a5a3c5ac15b1f823d342d6bd082f65d91b4a2195))
+  🔄 Core Changes:
+- Replace custom AI implementation with OpenAI service integration
+- Update PDF processing pipeline to use pdfcpu and OpenAI
+- Add document-specific prompts for different document types
+- Enhance category management with hierarchical paths
+
+🛠️ Technical Improvements:
+- Add CLI commands for prompt and category management
+- Implement proper error handling and validation
+- Add cost tracking and monitoring capabilities
+
+📝 The changes reflect our decision to use OpenAI's services instead of
+implementing our own model, while maintaining the flexibility to handle
+different document types and categories.
+
+🔧 Technical Details:
+- Update AIService interface to include prompt management
+- Add document-specific prompt templates
+- Enhance PDF processing pipeline with OpenAI integration
+- Add validation rules and confidence scoring
+- Implement proper error handling for OpenAI responses
+- Add cost tracking and rate limiting
+
+✨ This update streamlines our AI integration while improving
+maintainability and extensibility.
+* Merge pull request #21 from lindehoff/feature/openai-integration-design ([](https://github.com/lindehoff/Budget-Assist/commit/9d268e560a383fc204fb0dc6a1b356d3670759c7))
+  🤖 refactor(ai): update design for OpenAI integration
+* Merge pull request #22 from lindehoff/feat/category-management ([](https://github.com/lindehoff/Budget-Assist/commit/fd5fa94687c76b9a256bddd7471a8801e1b37bfc))
+  feat(category): implement category management system
+* **category:** implement category management system ([](https://github.com/lindehoff/Budget-Assist/commit/255b9394ae799531c0cd25b80ebb3846f83eb31b))
+  - ✨ Add category manager with CRUD operations
+- 🧪 Add comprehensive test suite for category management
+- 📦 Create store interface for database operations
+- 🔄 Implement translation support
+
+test(ai): enhance prompt testing
+
+- 🧪 Update prompt test cases
+- ✅ Add validation scenarios
+- 🔄 Improve test coverage
+
+docs(plan): update implementation documentation
+
+- 📝 Update Implementation Plan with completed features
+- ✨ Add Strategic Decisions section
+- 🎯 Update Iteration 3 tasks and status
+- ✅ Mark completed category management tasks
+
+build(deps): clean up dependencies
+
+- 🧹 Remove testify dependency
+- 📦 Update go.mod and go.sum
+- 🔨 Enhance error handling in db package
+* **docprocess:** improve test coverage to 84.4% ([](https://github.com/lindehoff/Budget-Assist/commit/50da57ba4cb2dd225e96f2b94dc0e14b46097acd))
+  * 🧪 Add comprehensive tests for error types and methods in types.go (100% coverage)
+* 🔍 Add test helper functions for creating valid and corrupted PDF files
+* ✅ Add test cases for PDF validation and processing (85.7% and 77.8% coverage)
+* 🔄 Implement integration test with known PDF content
+* 🐛 Fix error unwrapping test to correctly handle error comparisons
+
 ## 2.1.0 (2025-02-24)
 
 * Merge pull request #20 from lindehoff/feature/ai-service-integration ([](https://github.com/lindehoff/Budget-Assist/commit/4154f1f5928e2da9aca051024fa5428264ceb54a))
