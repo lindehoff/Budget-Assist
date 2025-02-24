@@ -1,10 +1,9 @@
 package ai
 
 import (
+	"strings"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestPromptTemplate_Execute(t *testing.T) {
@@ -16,7 +15,7 @@ func TestPromptTemplate_Execute(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name: "successful_transaction_categorization",
+			name: "Successfully_execute_transaction_categorization_template",
 			template: &PromptTemplate{
 				Name: "Test Template",
 				Template: `Analyze the following transaction:
@@ -45,7 +44,7 @@ Date: {{.Date}}`,
 			wantErr: false,
 		},
 		{
-			name: "invalid_template_syntax",
+			name: "Error_execute_template_with_invalid_syntax",
 			template: &PromptTemplate{
 				Name:     "Invalid Template",
 				Template: "Invalid {{.Missing}",
@@ -59,49 +58,132 @@ Date: {{.Date}}`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.template.Execute(tt.data)
-			if tt.wantErr {
-				assert.Error(t, err)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Execute() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			assert.NoError(t, err)
+			if tt.wantErr {
+				return
+			}
+
 			for _, want := range tt.wantContain {
-				assert.Contains(t, got, want)
+				if !strings.Contains(got, want) {
+					t.Errorf("Execute() result does not contain %q", want)
+				}
 			}
 		})
 	}
 }
 
 func TestNewPromptTemplate(t *testing.T) {
-	name := "Test Template"
-	content := "Test content"
-	pt := NewPromptTemplate(name, content)
+	tests := []struct {
+		name    string
+		tplName string
+		content string
+	}{
+		{
+			name:    "Successfully_create_new_prompt_template",
+			tplName: "Test Template",
+			content: "Test content",
+		},
+		{
+			name:    "Successfully_create_template_with_empty_content",
+			tplName: "Empty Template",
+			content: "",
+		},
+	}
 
-	assert.NotNil(t, pt)
-	assert.Equal(t, name, pt.Name)
-	assert.Equal(t, content, pt.Template)
-	assert.Empty(t, pt.Examples)
-	assert.Empty(t, pt.Rules)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pt := NewPromptTemplate(tt.tplName, tt.content)
+			if pt == nil {
+				t.Fatal("NewPromptTemplate() returned nil")
+			}
+			if pt.Name != tt.tplName {
+				t.Errorf("NewPromptTemplate().Name = %v, want %v", pt.Name, tt.tplName)
+			}
+			if pt.Template != tt.content {
+				t.Errorf("NewPromptTemplate().Template = %v, want %v", pt.Template, tt.content)
+			}
+			if len(pt.Examples) != 0 {
+				t.Error("NewPromptTemplate().Examples should be empty")
+			}
+			if len(pt.Rules) != 0 {
+				t.Error("NewPromptTemplate().Rules should be empty")
+			}
+		})
+	}
 }
 
 func TestPromptTemplate_AddExample(t *testing.T) {
-	pt := NewPromptTemplate("Test", "content")
-	example := Example{
-		Input:    "test input",
-		Expected: "test output",
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Successfully_add_example_to_template",
+			input:    "test input",
+			expected: "test output",
+		},
+		{
+			name:     "Successfully_add_example_with_empty_values",
+			input:    "",
+			expected: "",
+		},
 	}
-	pt.AddExample(example.Input, example.Expected)
 
-	assert.Len(t, pt.Examples, 1)
-	assert.Equal(t, example, pt.Examples[0])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pt := NewPromptTemplate("Test", "content")
+			pt.AddExample(tt.input, tt.expected)
+
+			if len(pt.Examples) != 1 {
+				t.Errorf("AddExample() resulted in %d examples, want 1", len(pt.Examples))
+				return
+			}
+
+			example := pt.Examples[0]
+			if example.Input != tt.input {
+				t.Errorf("AddExample() example.Input = %v, want %v", example.Input, tt.input)
+			}
+			if example.Expected != tt.expected {
+				t.Errorf("AddExample() example.Expected = %v, want %v", example.Expected, tt.expected)
+			}
+		})
+	}
 }
 
 func TestPromptTemplate_AddRule(t *testing.T) {
-	pt := NewPromptTemplate("Test", "content")
-	rule := "test rule"
-	pt.AddRule(rule)
+	tests := []struct {
+		name string
+		rule string
+	}{
+		{
+			name: "Successfully_add_rule_to_template",
+			rule: "test rule",
+		},
+		{
+			name: "Successfully_add_empty_rule",
+			rule: "",
+		},
+	}
 
-	assert.Len(t, pt.Rules, 1)
-	assert.Equal(t, rule, pt.Rules[0])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pt := NewPromptTemplate("Test", "content")
+			pt.AddRule(tt.rule)
+
+			if len(pt.Rules) != 1 {
+				t.Errorf("AddRule() resulted in %d rules, want 1", len(pt.Rules))
+				return
+			}
+
+			if pt.Rules[0] != tt.rule {
+				t.Errorf("AddRule() rule = %v, want %v", pt.Rules[0], tt.rule)
+			}
+		})
+	}
 }
 
 func TestCategory_Validation(t *testing.T) {
@@ -111,7 +193,7 @@ func TestCategory_Validation(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name: "valid_category",
+			name: "Successfully_validate_complete_category",
 			category: Category{
 				Name:        "Food",
 				Description: "Food and groceries",
@@ -121,7 +203,7 @@ func TestCategory_Validation(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "empty_name",
+			name: "Error_validate_category_with_empty_name",
 			category: Category{
 				Description: "Test description",
 			},
@@ -132,10 +214,9 @@ func TestCategory_Validation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// TODO: Add validation logic to Category struct
-			if tt.category.Name == "" {
-				assert.True(t, tt.wantErr)
-			} else {
-				assert.False(t, tt.wantErr)
+			hasError := tt.category.Name == ""
+			if hasError != tt.wantErr {
+				t.Errorf("Category validation error = %v, wantErr %v", hasError, tt.wantErr)
 			}
 		})
 	}
@@ -149,7 +230,7 @@ func TestTrainingExample_Validation(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid_example",
+			name: "Successfully_validate_complete_example",
 			example: TrainingExample{
 				Category: Category{
 					Name:     "Food",
@@ -163,7 +244,7 @@ func TestTrainingExample_Validation(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "invalid_confidence",
+			name: "Error_validate_example_with_invalid_confidence",
 			example: TrainingExample{
 				Category: Category{
 					Name: "Food",
@@ -180,10 +261,9 @@ func TestTrainingExample_Validation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// TODO: Add validation logic to TrainingExample struct
-			if tt.example.Confidence > 1.0 || tt.example.Confidence < 0.0 {
-				assert.True(t, tt.wantErr)
-			} else {
-				assert.False(t, tt.wantErr)
+			hasError := tt.example.Confidence > 1.0 || tt.example.Confidence < 0.0
+			if hasError != tt.wantErr {
+				t.Errorf("TrainingExample validation error = %v, wantErr %v", hasError, tt.wantErr)
 			}
 		})
 	}
