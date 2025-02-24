@@ -36,6 +36,14 @@ func NewStore(db *gorm.DB, logger *slog.Logger) Store {
 
 // CreateCategory creates a new category in the database
 func (s *SQLStore) CreateCategory(ctx context.Context, category *Category) error {
+	// Validate required fields
+	if category.Name == "" {
+		return fmt.Errorf("category name is required")
+	}
+	if category.TypeID == 0 {
+		return fmt.Errorf("category type ID is required")
+	}
+
 	result := s.db.WithContext(ctx).Create(category)
 	if result.Error != nil {
 		return fmt.Errorf("failed to create category: %w", result.Error)
@@ -94,6 +102,20 @@ func (s *SQLStore) GetCategoryTypeByID(ctx context.Context, id uint) (*CategoryT
 
 // CreateTranslation creates a new translation in the database
 func (s *SQLStore) CreateTranslation(ctx context.Context, translation *Translation) error {
+	// Validate required fields
+	if translation.Name == "" {
+		return fmt.Errorf("translation name is required")
+	}
+	if translation.EntityID == 0 {
+		return fmt.Errorf("entity ID is required")
+	}
+	if translation.EntityType == "" {
+		return fmt.Errorf("entity type is required")
+	}
+	if translation.LanguageCode == "" {
+		return fmt.Errorf("language code is required")
+	}
+
 	result := s.db.WithContext(ctx).Create(translation)
 	if result.Error != nil {
 		return fmt.Errorf("failed to create translation: %w", result.Error)

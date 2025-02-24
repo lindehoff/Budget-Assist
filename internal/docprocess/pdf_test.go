@@ -7,6 +7,43 @@ import (
 	"testing"
 )
 
+// createTestPDF creates a minimal valid PDF file for testing
+func createTestPDF(t *testing.T) []byte {
+	t.Helper()
+
+	// For testing purposes, we'll use a pre-generated minimal valid PDF
+	// This is a minimal valid PDF file that contains just enough to be valid
+	return []byte(`%PDF-1.7
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj
+4 0 obj<</Length 50>>stream
+BT /F1 12 Tf 72 712 Td (Test PDF Document) Tj ET
+endstream endobj
+xref
+0 5
+0000000000 65535 f
+0000000010 00000 n
+0000000053 00000 n
+0000000102 00000 n
+0000000177 00000 n
+trailer<</Size 5/Root 1 0 R>>
+startxref
+277
+%%EOF`)
+}
+
+// createCorruptedPDF creates an invalid PDF file for testing
+func createCorruptedPDF(t *testing.T) []byte {
+	t.Helper()
+	validPDF := createTestPDF(t)
+	// Corrupt the PDF by modifying some bytes in the middle
+	if len(validPDF) > 100 {
+		copy(validPDF[50:], []byte("corrupted data"))
+	}
+	return validPDF
+}
+
 func TestPDFProcessor_Type(t *testing.T) {
 	processor := NewPDFProcessor(nil)
 	if got := processor.Type(); got != TypePDF {
@@ -35,7 +72,17 @@ func TestPDFProcessor_Validate(t *testing.T) {
 			wantErr:  true,
 			errStage: StageValidation,
 		},
-		// TODO: Add test with valid PDF once we have test files
+		{
+			name:    "Successfully_validate_valid_pdf",
+			input:   createTestPDF(t),
+			wantErr: false,
+		},
+		{
+			name:     "Validate_error_corrupted_pdf",
+			input:    createCorruptedPDF(t),
+			wantErr:  true,
+			errStage: StageValidation,
+		},
 	}
 
 	for _, tt := range tests {
@@ -63,16 +110,15 @@ func TestPDFProcessor_Validate(t *testing.T) {
 }
 
 func TestPDFProcessor_Process(t *testing.T) {
-	// TODO: Use context.TODO() until we implement proper context handling
-	ctx := context.TODO() // TODO: Implement proper context handling with timeouts and cancellation
+	ctx := context.Background()
 
 	type testCase struct {
-		checkResult func(*testing.T, *ProcessingResult)
 		name        string
 		errStage    ProcessingStage
 		filename    string
 		input       []byte
 		wantErr     bool
+		checkResult func(*testing.T, *ProcessingResult)
 	}
 
 	tests := []testCase{
@@ -90,7 +136,33 @@ func TestPDFProcessor_Process(t *testing.T) {
 			wantErr:  true,
 			errStage: StageExtraction,
 		},
-		// TODO: Add test with valid PDF once we have test files
+		{
+			name:     "Successfully_process_valid_pdf",
+			input:    createTestPDF(t),
+			filename: "valid.pdf",
+			wantErr:  false,
+			checkResult: func(t *testing.T, result *ProcessingResult) {
+				if result.Metadata["filename"] != "valid.pdf" {
+					t.Errorf("ProcessingResult.Metadata[filename] = %v, want %v", result.Metadata["filename"], "valid.pdf")
+				}
+				if result.Metadata["content_type"] != "application/pdf" {
+					t.Errorf("ProcessingResult.Metadata[content_type] = %v, want application/pdf", result.Metadata["content_type"])
+				}
+				if result.Metadata["page_count"].(int) != 1 {
+					t.Errorf("ProcessingResult.Metadata[page_count] = %v, want 1", result.Metadata["page_count"])
+				}
+				if result.ProcessedAt.IsZero() {
+					t.Error("ProcessingResult.ProcessedAt is zero")
+				}
+			},
+		},
+		{
+			name:     "Process_error_corrupted_pdf",
+			input:    createCorruptedPDF(t),
+			filename: "corrupted.pdf",
+			wantErr:  true,
+			errStage: StageExtraction,
+		},
 	}
 
 	for _, tt := range tests {
@@ -118,14 +190,6 @@ func TestPDFProcessor_Process(t *testing.T) {
 			if result == nil {
 				t.Error("PDFProcessor.Process() returned nil result for success case")
 				return
-			}
-
-			if result.ProcessedAt.IsZero() {
-				t.Error("ProcessingResult.ProcessedAt is zero")
-			}
-
-			if result.Metadata == nil {
-				t.Error("ProcessingResult.Metadata is nil")
 			}
 
 			if tt.checkResult != nil {
@@ -186,7 +250,45 @@ func TestDefaultProcessorFactory(t *testing.T) {
 	})
 }
 
-// TODO: Add integration tests with real PDF files
 func TestPDFProcessor_Integration(t *testing.T) {
-	t.Skip("TODO: Implement integration tests with real PDF files")
+	ctx := context.Background()
+	processor := NewPDFProcessor(nil)
+
+	// Create a test PDF with known content
+	pdfData := createTestPDF(t)
+
+	// Test validation
+	if err := processor.Validate(bytes.NewReader(pdfData)); err != nil {
+		t.Errorf("Validate() error = %v", err)
+		return
+	}
+
+	// Test processing
+	result, err := processor.Process(ctx, bytes.NewReader(pdfData), "test.pdf")
+	if err != nil {
+		t.Errorf("Process() error = %v", err)
+		return
+	}
+
+	// Verify the processing result
+	if result.ProcessedAt.IsZero() {
+		t.Error("ProcessingResult.ProcessedAt is zero")
+	}
+
+	expectedMetadata := map[string]any{
+		"filename":     "test.pdf",
+		"content_type": "application/pdf",
+		"page_count":   1,
+	}
+
+	for key, want := range expectedMetadata {
+		if got := result.Metadata[key]; got != want {
+			t.Errorf("ProcessingResult.Metadata[%q] = %v, want %v", key, got, want)
+		}
+	}
+
+	// Verify text extraction
+	if textLen := result.Metadata["text_length"].(int); textLen == 0 {
+		t.Error("ProcessingResult.Metadata[text_length] is 0, expected some text to be extracted")
+	}
 }
