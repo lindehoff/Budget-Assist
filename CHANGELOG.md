@@ -1,5 +1,13 @@
 # Budget-Assist Changelog
 
+## <small>2.0.1 (2025-02-24)</small>
+
+* **ci:** update release workflow to use semantic versioning correctly ([](https://github.com/lindehoff/Budget-Assist/commit/505304f552e621c43ccb894ac72e95f36572ee9c))
+  * Add Git configuration for GitHub Actions bot authentication
+* Add semantic-release step ID for output tracking
+* Add conditional steps based on semantic-release success
+* Update tag reference to use github.ref for consistent versioning
+
 ## 2.0.0 (2025-02-24)
 
 * Merge pull request #18 from lindehoff/docs/update-iteration2-progress ([](https://github.com/lindehoff/Budget-Assist/commit/7d683397ecb7c383b1ec37221b34c3a1962e40f3))
