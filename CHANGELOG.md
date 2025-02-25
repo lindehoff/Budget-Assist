@@ -1,5 +1,25 @@
 # Budget-Assist Changelog
 
+## 2.5.0 (2025-02-25)
+
+* Enhance OpenAI integration and document processing capabilities 🎉 ([](https://github.com/lindehoff/Budget-Assist/commit/5ec5c3184b8eabba2ed376bab20e59ea6c7eec58))
+  - Updated the overview to reflect the new functionalities of the system,
+  emphasizing PDF document processing and transaction categorization. 📄
+- Introduced new core components, including the DocumentData and
+  ExtractionResult types for better document handling. 🛠️
+- Added methods for adding examples to prompts and improved the
+  AnalysisRequest structure by removing unnecessary fields. ✨
+- Updated prompt templates for bank statements, CSV transactions,
+  invoices, and receipts to enhance extraction accuracy. 📊
+- Removed deprecated types and methods related to document data
+  extraction and processing. 🗑️
+- Improved the CLI integration by adding new commands for processing
+  and categorizing transactions. ⚙️
+- Enhanced configuration structures for OpenAI and PDF processing
+  to support new features and optimizations. 🔧
+- Refined error handling and monitoring strategies to ensure
+  robustness in document processing and API interactions. 🔍
+
 ## <small>2.4.1 (2025-02-25)</small>
 
 * **category:** resolve race conditions in concurrent category operations ([](https://github.com/lindehoff/Budget-Assist/commit/d150c4dff145d3d7786128f8e66ba6eb7f397e3f))
