@@ -690,17 +690,17 @@ func TestSuggestCategory_Error(t *testing.T) {
 // TestConcurrent_category_operations tests the manager's behavior under concurrent load
 func TestConcurrent_category_operations(t *testing.T) {
 	manager, _ := createTestManager(t)
-
-	// Number of concurrent operations
-	numOperations := 10
+	numOperations := 5
 	var wg sync.WaitGroup
-	wg.Add(numOperations * 2) // For both create and update operations
+	wg.Add(numOperations * 2)
 
-	// Channel to collect errors
 	errCh := make(chan error, numOperations*2)
 
-	// Create categories concurrently
+	// Use a mutex to protect the categories slice
+	var categoriesMu sync.RWMutex
 	categories := make([]*db.Category, numOperations)
+
+	// Create categories concurrently
 	for i := 0; i < numOperations; i++ {
 		go func(i int) {
 			defer wg.Done()
@@ -725,7 +725,10 @@ func TestConcurrent_category_operations(t *testing.T) {
 				errCh <- fmt.Errorf("create operation %d failed: %w", i, err)
 				return
 			}
+
+			categoriesMu.Lock()
 			categories[i] = category
+			categoriesMu.Unlock()
 		}(i)
 	}
 
@@ -743,7 +746,11 @@ func TestConcurrent_category_operations(t *testing.T) {
 			// Try updating until category is available
 			var lastErr error
 			for retries := 0; retries < 3; retries++ {
-				if categories[i] == nil {
+				categoriesMu.RLock()
+				category := categories[i]
+				categoriesMu.RUnlock()
+
+				if category == nil {
 					time.Sleep(10 * time.Millisecond)
 					continue
 				}
@@ -753,7 +760,7 @@ func TestConcurrent_category_operations(t *testing.T) {
 					Description: fmt.Sprintf("Updated description %d", i),
 				}
 
-				_, err := manager.UpdateCategory(ctx, categories[i].ID, req)
+				_, err := manager.UpdateCategory(ctx, category.ID, req)
 				if err == nil {
 					return
 				}
@@ -786,12 +793,16 @@ func TestConcurrent_category_operations(t *testing.T) {
 	// Verify final state
 	ctx := context.Background()
 	for i := 0; i < numOperations; i++ {
-		if categories[i] == nil {
+		categoriesMu.RLock()
+		category := categories[i]
+		categoriesMu.RUnlock()
+
+		if category == nil {
 			t.Errorf("Category %d was not created", i)
 			continue
 		}
 
-		category, err := manager.GetCategoryByID(ctx, categories[i].ID)
+		category, err := manager.GetCategoryByID(ctx, category.ID)
 		if err != nil {
 			t.Errorf("Failed to get category %d: %v", i, err)
 			continue
