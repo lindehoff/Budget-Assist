@@ -19,6 +19,7 @@ type mockStore struct {
 	categories   map[uint]*db.Category
 	translations map[uint][]db.Translation
 	nextID       uint
+	mu           sync.RWMutex
 }
 
 func newMockStore() db.Store {
@@ -29,7 +30,9 @@ func newMockStore() db.Store {
 	}
 }
 
-func (m *mockStore) CreateCategory(_ context.Context, category *db.Category) error {
+func (m *mockStore) CreateCategory(ctx context.Context, category *db.Category) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	category.ID = m.nextID
 	category.CreatedAt = time.Now()
 	category.UpdatedAt = time.Now()
@@ -38,7 +41,9 @@ func (m *mockStore) CreateCategory(_ context.Context, category *db.Category) err
 	return nil
 }
 
-func (m *mockStore) UpdateCategory(_ context.Context, category *db.Category) error {
+func (m *mockStore) UpdateCategory(ctx context.Context, category *db.Category) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, exists := m.categories[category.ID]; !exists {
 		return db.ErrNotFound
 	}
@@ -47,14 +52,18 @@ func (m *mockStore) UpdateCategory(_ context.Context, category *db.Category) err
 	return nil
 }
 
-func (m *mockStore) GetCategoryByID(_ context.Context, id uint) (*db.Category, error) {
+func (m *mockStore) GetCategoryByID(ctx context.Context, id uint) (*db.Category, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if category, exists := m.categories[id]; exists {
 		return category, nil
 	}
 	return nil, db.ErrNotFound
 }
 
-func (m *mockStore) ListCategories(_ context.Context, typeID *uint) ([]db.Category, error) {
+func (m *mockStore) ListCategories(ctx context.Context, typeID *uint) ([]db.Category, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var categories []db.Category
 	for _, cat := range m.categories {
 		if typeID == nil || cat.TypeID == *typeID {
@@ -64,16 +73,20 @@ func (m *mockStore) ListCategories(_ context.Context, typeID *uint) ([]db.Catego
 	return categories, nil
 }
 
-func (m *mockStore) CreateTranslation(_ context.Context, translation *db.Translation) error {
+func (m *mockStore) CreateTranslation(ctx context.Context, translation *db.Translation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.translations[translation.EntityID] = append(m.translations[translation.EntityID], *translation)
 	return nil
 }
 
-func (m *mockStore) GetTranslations(_ context.Context, entityID uint, entityType string) ([]db.Translation, error) {
+func (m *mockStore) GetTranslations(ctx context.Context, entityID uint, entityType string) ([]db.Translation, error) {
 	return m.translations[entityID], nil
 }
 
-func (m *mockStore) DeleteCategory(_ context.Context, id uint) error {
+func (m *mockStore) DeleteCategory(ctx context.Context, id uint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, exists := m.categories[id]; !exists {
 		return db.ErrNotFound
 	}
@@ -81,7 +94,7 @@ func (m *mockStore) DeleteCategory(_ context.Context, id uint) error {
 	return nil
 }
 
-func (m *mockStore) GetCategoryTypeByID(_ context.Context, id uint) (*db.CategoryType, error) {
+func (m *mockStore) GetCategoryTypeByID(ctx context.Context, id uint) (*db.CategoryType, error) {
 	// For testing, we'll return a simple category type
 	if id == 1 {
 		return &db.CategoryType{
@@ -93,34 +106,34 @@ func (m *mockStore) GetCategoryTypeByID(_ context.Context, id uint) (*db.Categor
 	return nil, db.ErrNotFound
 }
 
-func (m *mockStore) GetPromptByType(_ context.Context, promptType string) (*db.Prompt, error) {
+func (m *mockStore) GetPromptByType(ctx context.Context, promptType string) (*db.Prompt, error) {
 	return nil, nil
 }
 
-func (m *mockStore) UpdatePrompt(_ context.Context, prompt *db.Prompt) error {
+func (m *mockStore) UpdatePrompt(ctx context.Context, prompt *db.Prompt) error {
 	return nil
 }
 
-func (m *mockStore) ListPrompts(_ context.Context) ([]db.Prompt, error) {
+func (m *mockStore) ListPrompts(ctx context.Context) ([]db.Prompt, error) {
 	return nil, nil
 }
 
 type mockAIService struct{}
 
-func (m *mockAIService) AnalyzeTransaction(_ context.Context, _ *db.Transaction) (*ai.Analysis, error) {
+func (m *mockAIService) AnalyzeTransaction(ctx context.Context, _ *db.Transaction) (*ai.Analysis, error) {
 	return &ai.Analysis{
 		Remarks: "Test analysis",
 		Score:   0.95,
 	}, nil
 }
 
-func (m *mockAIService) ExtractDocument(_ context.Context, _ *ai.Document) (*ai.Extraction, error) {
+func (m *mockAIService) ExtractDocument(ctx context.Context, _ *ai.Document) (*ai.Extraction, error) {
 	return &ai.Extraction{
 		Content: "Test extraction",
 	}, nil
 }
 
-func (m *mockAIService) SuggestCategories(_ context.Context, _ string) ([]ai.CategoryMatch, error) {
+func (m *mockAIService) SuggestCategories(ctx context.Context, _ string) ([]ai.CategoryMatch, error) {
 	return []ai.CategoryMatch{
 		{
 			Category:   "expenses.food",
@@ -599,14 +612,14 @@ type mockStoreWithErrors struct {
 	shouldError bool
 }
 
-func (m *mockStoreWithErrors) CreateCategory(_ context.Context, _ *db.Category) error {
+func (m *mockStoreWithErrors) CreateCategory(ctx context.Context, _ *db.Category) error {
 	if m.shouldError {
 		return fmt.Errorf("database error")
 	}
 	return nil
 }
 
-func (m *mockStoreWithErrors) CreateTranslation(_ context.Context, _ *db.Translation) error {
+func (m *mockStoreWithErrors) CreateTranslation(ctx context.Context, _ *db.Translation) error {
 	if m.shouldError {
 		return fmt.Errorf("database error")
 	}
