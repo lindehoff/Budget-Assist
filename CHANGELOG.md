@@ -1,5 +1,22 @@
 # Budget-Assist Changelog
 
+## <small>2.4.1 (2025-02-25)</small>
+
+* **category:** resolve race conditions in concurrent category operations ([](https://github.com/lindehoff/Budget-Assist/commit/d150c4dff145d3d7786128f8e66ba6eb7f397e3f))
+  • Added proper synchronization using sync.RWMutex for concurrent category operations
+• Reduced concurrent operations from 10 to 5 for better test stability
+• Protected shared state access with appropriate locks in TestConcurrent_category_operations
+• Implemented retries for category updates to handle race conditions gracefully
+• Verified fix with race detector enabled (-race flag)
+
+Test coverage improvements:
+- internal/api: 100%
+- internal/category: 91.7%
+- internal/core: 100%
+- internal/db: 52.8%
+- internal/docprocess: 84.4%
+- internal/processor: 93.8%
+
 ## 2.4.0 (2025-02-25)
 
 * **mockStore:** add concurrency support with RWMutex 🛠️ ([](https://github.com/lindehoff/Budget-Assist/commit/5d6b1fc8b9cbc9710ed204c212d9729c5e8a62b6))
