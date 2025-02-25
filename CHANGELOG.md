@@ -1,5 +1,16 @@
 # Budget-Assist Changelog
 
+## 2.4.0 (2025-02-25)
+
+* **mockStore:** add concurrency support with RWMutex 🛠️ ([](https://github.com/lindehoff/Budget-Assist/commit/5d6b1fc8b9cbc9710ed204c212d9729c5e8a62b6))
+  - Introduced a RWMutex to the mockStore struct to ensure safe concurrent access
+  to categories and translations. 🔒
+- Updated CreateCategory, UpdateCategory, GetCategoryByID, ListCategories,
+  CreateTranslation, DeleteCategory, GetCategoryTypeByID, GetPromptByType,
+  UpdatePrompt, and ListPrompts methods to use locking mechanisms. 🔄
+- This change enhances the mockStore's ability to handle concurrent operations
+  in tests, improving reliability and preventing race conditions. 🚀
+
 ## 2.3.0 (2025-02-24)
 
 * **cmd:** ✨ implement category management commands ([](https://github.com/lindehoff/Budget-Assist/commit/a60cb982d7e20c030a5b492d455d32a0afac02c2))
