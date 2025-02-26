@@ -1,5 +1,19 @@
 # Budget-Assist Changelog
 
+## 2.7.0 (2025-02-26)
+
+* add data import commands and enhance processing configuration ([](https://github.com/lindehoff/Budget-Assist/commit/1525f6249a4616ecf6f6d32d567847eb5a47cb48))
+  - feat(cmd): add category import subcommand for JSON imports
+- feat(cmd/process): add context flags for document processing
+- feat(prompt): implement template import from JSON files
+- feat: configure logging based on debug flag in root command
+- feat(defaults): add initial prompts and categories with translations
+- feat(ai): extend analysis options with document type and hints
+- feat(pipeline): implement ProcessOptions for runtime configuration
+- chore(deps): update project dependencies in go.mod
+- chore(test): refactor mock stores and update test cases
+- chore(db): improve logging configuration and model definitions
+
 ## <small>2.6.1 (2025-02-26)</small>
 
 * **design:** update CLI design for runtime user insights ([](https://github.com/lindehoff/Budget-Assist/commit/b8885b74fff941d6549a03c3a30bcc1b1703f3dd))
