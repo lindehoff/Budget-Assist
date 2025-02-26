@@ -149,16 +149,32 @@ func TestCommonErrors(t *testing.T) {
 		err      error
 		wantText string
 	}{
-		{"InvalidInput", ErrInvalidInput, "invalid input provided"},
-		{"NotFound", ErrNotFound, "resource not found"},
-		{"AlreadyExists", ErrAlreadyExists, "resource already exists"},
-		{"InvalidOperation", ErrInvalidOperation, "invalid operation"},
+		{
+			name:     "Successfully_return_InvalidInput_error",
+			err:      ErrInvalidInput,
+			wantText: "invalid input provided",
+		},
+		{
+			name:     "Successfully_return_NotFound_error",
+			err:      ErrNotFound,
+			wantText: "resource not found",
+		},
+		{
+			name:     "Successfully_return_AlreadyExists_error",
+			err:      ErrAlreadyExists,
+			wantText: "resource already exists",
+		},
+		{
+			name:     "Successfully_return_InvalidOperation_error",
+			err:      ErrInvalidOperation,
+			wantText: "invalid operation",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.err.Error() != tt.wantText {
-				t.Errorf("%s.Error() = %v, want %v", tt.name, tt.err.Error(), tt.wantText)
+				t.Errorf("Error() = %q, want %q", tt.err.Error(), tt.wantText)
 			}
 		})
 	}

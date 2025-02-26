@@ -93,52 +93,60 @@ func (pm *PromptManager) UpdatePrompt(ctx context.Context, template *PromptTempl
 		return fmt.Errorf("template cannot be nil")
 	}
 
-	if err := template.Validate(); err != nil {
-		return fmt.Errorf("invalid template: %w", err)
+	// Basic validation
+	if template.Type == "" {
+		return fmt.Errorf("prompt type is required")
+	}
+	if template.Name == "" {
+		return fmt.Errorf("prompt name is required")
+	}
+	if template.SystemPrompt == "" {
+		return fmt.Errorf("system prompt is required")
+	}
+	if template.UserPrompt == "" {
+		return fmt.Errorf("user prompt is required")
 	}
 
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
-	// If updating existing template, increment version
-	if existing, ok := pm.templates[template.Type]; ok {
-		template.Version = incrementVersion(existing.Version)
+	// Convert examples to JSON if present
+	var examplesJSON string
+	if len(template.Examples) > 0 {
+		data, err := json.Marshal(template.Examples)
+		if err != nil {
+			return fmt.Errorf("failed to marshal examples: %w", err)
+		}
+		examplesJSON = string(data)
 	}
 
-	// Marshal examples and rules to JSON
-	examples, err := json.Marshal(template.Examples)
-	if err != nil {
-		return fmt.Errorf("failed to marshal examples: %w", err)
-	}
-	rules, err := json.Marshal(template.Rules)
-	if err != nil {
-		return fmt.Errorf("failed to marshal rules: %w", err)
+	// Convert rules to JSON if present
+	var rulesJSON string
+	if len(template.Rules) > 0 {
+		data, err := json.Marshal(template.Rules)
+		if err != nil {
+			return fmt.Errorf("failed to marshal rules: %w", err)
+		}
+		rulesJSON = string(data)
 	}
 
-	// Update in database
+	// Create or update the prompt in the database
 	dbPrompt := &db.Prompt{
 		Type:         string(template.Type),
 		Name:         template.Name,
 		SystemPrompt: template.SystemPrompt,
 		UserPrompt:   template.UserPrompt,
-		Examples:     string(examples),
-		Rules:        string(rules),
+		Examples:     examplesJSON,
+		Rules:        rulesJSON,
 		Version:      template.Version,
 		IsActive:     template.IsActive,
-		CreatedAt:    template.CreatedAt,
-		UpdatedAt:    time.Now(),
 	}
 
 	if err := pm.store.UpdatePrompt(ctx, dbPrompt); err != nil {
-		return fmt.Errorf("failed to update prompt in store: %w", err)
+		return fmt.Errorf("failed to update prompt in database: %w", err)
 	}
 
-	// Update cache
+	// Update the cache
+	pm.mu.Lock()
 	pm.templates[template.Type] = template
-
-	pm.logger.Info("prompt template updated",
-		"type", template.Type,
-		"version", template.Version)
+	pm.mu.Unlock()
 
 	return nil
 }

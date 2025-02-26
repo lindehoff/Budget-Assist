@@ -9,7 +9,7 @@ import (
 
 func TestPromptManager_GetPrompt(t *testing.T) {
 	logger := slog.Default()
-	store := newMockStore()
+	store := NewMockStore()
 	pm := NewPromptManager(store, logger)
 
 	// Add a test template
@@ -61,7 +61,7 @@ func TestPromptManager_GetPrompt(t *testing.T) {
 
 func TestPromptManager_UpdatePrompt(t *testing.T) {
 	logger := slog.Default()
-	store := newMockStore()
+	store := NewMockStore()
 	pm := NewPromptManager(store, logger)
 
 	tests := []struct {
@@ -101,7 +101,7 @@ func TestPromptManager_UpdatePrompt(t *testing.T) {
 
 func TestPromptManager_ListPrompts(t *testing.T) {
 	logger := slog.Default()
-	store := newMockStore()
+	store := NewMockStore()
 	pm := NewPromptManager(store, logger)
 
 	// Add some test templates
@@ -142,7 +142,7 @@ func TestPromptManager_ListPrompts(t *testing.T) {
 
 func TestPromptManager_DeactivatePrompt(t *testing.T) {
 	logger := slog.Default()
-	store := newMockStore()
+	store := NewMockStore()
 	pm := NewPromptManager(store, logger)
 
 	// Add a test template

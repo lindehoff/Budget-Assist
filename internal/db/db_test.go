@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -41,7 +42,7 @@ func closeTestDB(db interface{}) error {
 func setupTestDB(t *testing.T) (context.Context, *gorm.DB, func()) {
 	// Create test context with logger
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo,
 	}))
 	ctx := WithLogger(context.Background(), logger)
 
@@ -135,45 +136,45 @@ func createAndValidateEntities(t *testing.T, ctx context.Context, db *gorm.DB, t
 
 func validateEntities(t *testing.T, ctx context.Context, db *gorm.DB, tc *testCase) {
 	// Test Translation Retrieval
-	var foundCategoryType CategoryType
-	result := db.WithContext(ctx).First(&foundCategoryType, tc.categoryType.ID)
+	var found CategoryType
+	result := db.WithContext(ctx).First(&found, tc.categoryType.ID)
 	if result.Error != nil {
 		t.Fatalf("failed to retrieve category type: %v", result.Error)
 	}
 
 	var translations []Translation
-	result = db.WithContext(ctx).Where("entity_type = ? AND entity_id = ?", EntityTypeCategoryType, foundCategoryType.ID).Find(&translations)
+	result = db.WithContext(ctx).Where("entity_type = ? AND entity_id = ?", EntityTypeCategoryType, found.ID).Find(&translations)
 	if result.Error != nil {
 		t.Fatalf("failed to retrieve translations: %v", result.Error)
 	}
-	foundCategoryType.Translations = translations
+	found.Translations = translations
 
 	// Test translation methods
-	if foundCategoryType.GetTranslation(LangSV) != tc.categoryTypeTransl.Name {
-		t.Errorf("expected Swedish translation %q, got %q", tc.categoryTypeTransl.Name, foundCategoryType.GetTranslation(LangSV))
+	if found.GetTranslation(LangSV) != tc.categoryTypeTransl.Name {
+		t.Errorf("expected Swedish translation %q, got %q", tc.categoryTypeTransl.Name, found.GetTranslation(LangSV))
 	}
-	if foundCategoryType.GetTranslation(LangEN) != tc.categoryType.Name {
-		t.Errorf("expected English name %q, got %q", tc.categoryType.Name, foundCategoryType.GetTranslation(LangEN))
+	if found.GetTranslation(LangEN) != tc.categoryType.Name {
+		t.Errorf("expected English name %q, got %q", tc.categoryType.Name, found.GetTranslation(LangEN))
 	}
 
 	// Test Transaction Retrieval with Relations
-	var found Transaction
-	result = db.WithContext(ctx).Preload("Category").Preload("Subcategory").First(&found, tc.transaction.ID)
+	var foundTransaction Transaction
+	result = db.WithContext(ctx).Preload("Category").Preload("Subcategory").First(&foundTransaction, tc.transaction.ID)
 	if result.Error != nil {
 		t.Fatalf("failed to retrieve transaction: %v", result.Error)
 	}
 
 	// Verify transaction details
-	if found.Amount != tc.transaction.Amount {
-		t.Errorf("expected amount %v, got %v", tc.transaction.Amount, found.Amount)
+	if !foundTransaction.Amount.Equal(tc.transaction.Amount) {
+		t.Errorf("expected amount %s, got %s", tc.transaction.Amount.String(), foundTransaction.Amount.String())
 	}
-	if found.Currency != tc.transaction.Currency {
-		t.Errorf("expected currency %v, got %v", tc.transaction.Currency, found.Currency)
+	if foundTransaction.Currency != tc.transaction.Currency {
+		t.Errorf("expected currency %v, got %v", tc.transaction.Currency, foundTransaction.Currency)
 	}
-	if found.Category == nil {
+	if foundTransaction.Category == nil {
 		t.Error("expected category to be loaded")
 	}
-	if found.Subcategory == nil {
+	if foundTransaction.Subcategory == nil {
 		t.Error("expected subcategory to be loaded")
 	}
 }
@@ -196,7 +197,7 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				Name:         "Fordon",
 			},
 			category: Category{
-				Name:               "Car",
+				Name:               "My Vehicle",
 				InstanceIdentifier: "Vehicle: ABC123",
 				IsActive:           true,
 			},
@@ -216,52 +217,49 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				Name:         "Bränsle",
 			},
 			transaction: Transaction{
-				Amount:          150.00,
-				Currency:        CurrencySEK,
-				TransactionDate: time.Now(),
-				Description:     "Fuel purchase",
-				RawData:         "Original transaction data",
-				AIAnalysis:      "AI-generated insights about the transaction",
+				Amount:      decimal.NewFromFloat(150.00),
+				Currency:    CurrencySEK,
+				Date:        time.Now(),
+				Description: "Fuel purchase",
 			},
 		},
 		{
-			name: "Fixed costs with translations and transaction",
+			name: "Property with translations and transaction",
 			categoryType: CategoryType{
-				Name:        "Fixed Costs",
-				IsMultiple:  false,
-				Description: "Regular fixed expenses",
+				Name:        "Property",
+				IsMultiple:  true,
+				Description: "Property related expenses",
 			},
 			categoryTypeTransl: Translation{
 				EntityType:   string(EntityTypeCategoryType),
 				LanguageCode: LangSV,
-				Name:         "Fasta kostnader",
+				Name:         "Fastighet",
 			},
 			category: Category{
-				Name:     "Media",
-				IsActive: true,
+				Name:               "My Property",
+				InstanceIdentifier: "Property: Apartment1",
+				IsActive:           true,
 			},
 			categoryTransl: Translation{
 				EntityType:   string(EntityTypeCategory),
 				LanguageCode: LangSV,
-				Name:         "Medier",
+				Name:         "Lägenhet",
 			},
 			subcategory: Subcategory{
-				Name:        "Internet",
-				Description: "Internet subscription",
+				Name:        "Electricity",
+				Description: "Electricity expenses",
 				IsSystem:    true,
 			},
 			subcategoryTransl: Translation{
 				EntityType:   string(EntityTypeSubcategory),
 				LanguageCode: LangSV,
-				Name:         "Internet",
+				Name:         "El",
 			},
 			transaction: Transaction{
-				Amount:          299.00,
-				Currency:        CurrencyEUR,
-				TransactionDate: time.Now(),
-				Description:     "Monthly internet subscription",
-				RawData:         "Original transaction data",
-				AIAnalysis:      "AI-generated insights about the transaction",
+				Amount:      decimal.NewFromFloat(299.00),
+				Currency:    CurrencySEK,
+				Date:        time.Now(),
+				Description: "Monthly electricity bill",
 			},
 		},
 		{
@@ -277,32 +275,30 @@ func Test_Successfully_create_and_retrieve_entities(t *testing.T) {
 				Name:         "Inkomster",
 			},
 			category: Category{
-				Name:               "Primary Job",
+				Name:               "My Income",
 				InstanceIdentifier: "Income: Salary",
 				IsActive:           true,
 			},
 			categoryTransl: Translation{
 				EntityType:   string(EntityTypeCategory),
 				LanguageCode: LangSV,
-				Name:         "Huvudarbete",
+				Name:         "Lön",
 			},
 			subcategory: Subcategory{
-				Name:        "Salary",
-				Description: "Monthly salary",
+				Name:        "Monthly Salary",
+				Description: "Regular monthly salary",
 				IsSystem:    true,
 			},
 			subcategoryTransl: Translation{
 				EntityType:   string(EntityTypeSubcategory),
 				LanguageCode: LangSV,
-				Name:         "Lön",
+				Name:         "Månadslön",
 			},
 			transaction: Transaction{
-				Amount:          25000.00,
-				Currency:        CurrencyUSD,
-				TransactionDate: time.Now(),
-				Description:     "Monthly salary payment",
-				RawData:         "Original transaction data",
-				AIAnalysis:      "AI-generated insights about the transaction",
+				Amount:      decimal.NewFromFloat(25000.00),
+				Currency:    CurrencySEK,
+				Date:        time.Now(),
+				Description: "January salary",
 			},
 		},
 	}
@@ -342,7 +338,7 @@ func Test_Transaction_error_invalid_currency(t *testing.T) {
 
 	// Try to create a transaction with invalid currency
 	tx := &Transaction{
-		Amount:          100.00,
+		Amount:          decimal.NewFromFloat(100.00),
 		Currency:        "INVALID",
 		TransactionDate: time.Now(),
 		Description:     "Test transaction",
@@ -354,5 +350,43 @@ func Test_Transaction_error_invalid_currency(t *testing.T) {
 	if result.Error == nil {
 		t.Error("expected error for invalid currency, got nil")
 		return
+	}
+}
+
+func TestStore_GetTransactions(t *testing.T) {
+	ctx, db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Use context consistently
+	categoryType := &CategoryType{Name: "Test"}
+	if err := db.WithContext(ctx).Create(categoryType).Error; err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	category := &Category{TypeID: categoryType.ID, Name: "Test Category"}
+	if err := db.WithContext(ctx).Create(category).Error; err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	// Create transaction with context
+	tx := &Transaction{
+		Amount:      decimal.NewFromFloat(100.00),
+		Currency:    CurrencySEK,
+		CategoryID:  &category.ID,
+		Description: "Test transaction",
+	}
+	if err := db.WithContext(ctx).Create(tx).Error; err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	// Retrieve transactions with context
+	var got []Transaction
+	if err := db.WithContext(ctx).Find(&got).Error; err != nil {
+		t.Fatalf("GetTransactions() error: %v", err)
+	}
+
+	// Validate results
+	if len(got) != 1 || !got[0].Amount.Equal(tx.Amount) {
+		t.Errorf("GetTransactions() unexpected results: %+v", got)
 	}
 }

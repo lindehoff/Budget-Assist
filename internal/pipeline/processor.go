@@ -16,6 +16,16 @@ import (
 	"github.com/lindehoff/Budget-Assist/internal/processor"
 )
 
+// ProcessOptions contains runtime options for document processing
+type ProcessOptions struct {
+	// DocumentType specifies the type of document being processed (e.g., "receipt", "bank_statement", "invoice")
+	DocumentType string
+	// TransactionInsights provides additional context about the transactions in the document
+	TransactionInsights string
+	// CategoryInsights provides hints or context for transaction categorization
+	CategoryInsights string
+}
+
 // ProcessingResult represents the result of processing a document
 type ProcessingResult struct {
 	FilePath          string
@@ -43,8 +53,8 @@ func NewPipeline(dp *docprocess.PDFProcessor, cp *processor.SEBProcessor, ai ai.
 	}
 }
 
-// ProcessDocuments processes all documents in the given path
-func (p *Pipeline) ProcessDocuments(ctx context.Context, path string) ([]ProcessingResult, error) {
+// ProcessDocuments processes all documents in the given path with the specified options
+func (p *Pipeline) ProcessDocuments(ctx context.Context, path string, opts ProcessOptions) ([]ProcessingResult, error) {
 	var results []ProcessingResult
 
 	// Check if path is a file or directory
@@ -60,7 +70,7 @@ func (p *Pipeline) ProcessDocuments(ctx context.Context, path string) ([]Process
 				return err
 			}
 			if !d.IsDir() {
-				result, err := p.processFile(ctx, path)
+				result, err := p.processFile(ctx, path, opts)
 				if err != nil {
 					p.logger.Error("failed to process file", "path", path, "error", err)
 					results = append(results, ProcessingResult{
@@ -77,7 +87,7 @@ func (p *Pipeline) ProcessDocuments(ctx context.Context, path string) ([]Process
 		}
 	} else {
 		// Process single file
-		result, err := p.processFile(ctx, path)
+		result, err := p.processFile(ctx, path, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process file: %w", err)
 		}
@@ -88,7 +98,7 @@ func (p *Pipeline) ProcessDocuments(ctx context.Context, path string) ([]Process
 }
 
 // processFile handles processing of a single file
-func (p *Pipeline) processFile(ctx context.Context, path string) (ProcessingResult, error) {
+func (p *Pipeline) processFile(ctx context.Context, path string, opts ProcessOptions) (ProcessingResult, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
 	var transactions []db.Transaction
@@ -96,9 +106,9 @@ func (p *Pipeline) processFile(ctx context.Context, path string) (ProcessingResu
 
 	switch ext {
 	case ".pdf":
-		transactions, err = p.processPDF(ctx, path)
+		transactions, err = p.processPDF(ctx, path, opts)
 	case ".csv":
-		transactions, err = p.processCSV(ctx, path)
+		transactions, err = p.processCSV(ctx, path, opts)
 	default:
 		return ProcessingResult{FilePath: path}, fmt.Errorf("unsupported file type: %s", ext)
 	}
@@ -109,7 +119,7 @@ func (p *Pipeline) processFile(ctx context.Context, path string) (ProcessingResu
 
 	// Store transactions in database
 	for _, tx := range transactions {
-		if err := p.store.StoreTransaction(ctx, &tx); err != nil {
+		if err := p.store.CreateTransaction(ctx, &tx); err != nil {
 			p.logger.Error("failed to store transaction", "error", err)
 			continue
 		}
@@ -122,7 +132,7 @@ func (p *Pipeline) processFile(ctx context.Context, path string) (ProcessingResu
 }
 
 // processPDF handles PDF document processing
-func (p *Pipeline) processPDF(ctx context.Context, path string) ([]db.Transaction, error) {
+func (p *Pipeline) processPDF(ctx context.Context, path string, opts ProcessOptions) ([]db.Transaction, error) {
 	// Extract text from PDF
 	file, err := os.Open(path)
 	if err != nil {
@@ -146,12 +156,20 @@ func (p *Pipeline) processPDF(ctx context.Context, path string) ([]db.Transactio
 			continue
 		}
 
-		// Analyze transaction for categorization
-		analysis, err := p.aiService.AnalyzeTransaction(ctx, &db.Transaction{
-			Description: tx.Description,
-			Amount:      tx.Amount.InexactFloat64(),
-			RawData:     string(rawData),
-			Currency:    db.CurrencySEK, // Default to SEK
+		// Create transaction record with insights
+		dbTx := db.Transaction{
+			Description:     tx.Description,
+			Amount:          tx.Amount,
+			TransactionDate: tx.Date,
+			RawData:         string(rawData),
+			Currency:        db.CurrencySEK, // Default to SEK
+		}
+
+		// Analyze transaction for categorization with insights
+		analysis, err := p.aiService.AnalyzeTransaction(ctx, &dbTx, ai.AnalysisOptions{
+			DocumentType:     opts.DocumentType,
+			TransactionHints: opts.TransactionInsights,
+			CategoryHints:    opts.CategoryInsights,
 		})
 		if err != nil {
 			p.logger.Error("failed to analyze transaction", "error", err)
@@ -165,15 +183,7 @@ func (p *Pipeline) processPDF(ctx context.Context, path string) ([]db.Transactio
 			continue
 		}
 
-		// Create transaction record
-		dbTx := db.Transaction{
-			Description:     tx.Description,
-			Amount:          tx.Amount.InexactFloat64(),
-			TransactionDate: tx.Date,
-			RawData:         string(rawData),
-			AIAnalysis:      string(aiAnalysis),
-			Currency:        db.CurrencySEK, // Default to SEK
-		}
+		dbTx.AIAnalysis = string(aiAnalysis)
 		transactions = append(transactions, dbTx)
 	}
 
@@ -181,7 +191,7 @@ func (p *Pipeline) processPDF(ctx context.Context, path string) ([]db.Transactio
 }
 
 // processCSV handles CSV document processing
-func (p *Pipeline) processCSV(ctx context.Context, path string) ([]db.Transaction, error) {
+func (p *Pipeline) processCSV(ctx context.Context, path string, opts ProcessOptions) ([]db.Transaction, error) {
 	// Process CSV using SEB processor
 	file, err := os.Open(path)
 	if err != nil {
@@ -206,7 +216,7 @@ func (p *Pipeline) processCSV(ctx context.Context, path string) ([]db.Transactio
 
 		dbTx := db.Transaction{
 			Description:     tx.Description,
-			Amount:          tx.Amount.InexactFloat64(),
+			Amount:          tx.Amount,
 			TransactionDate: tx.Date,
 			RawData:         string(rawData),
 			Currency:        db.CurrencySEK, // Default to SEK
@@ -214,7 +224,11 @@ func (p *Pipeline) processCSV(ctx context.Context, path string) ([]db.Transactio
 
 		// Only analyze with AI if service is available
 		if p.aiService != nil {
-			analysis, err := p.aiService.AnalyzeTransaction(ctx, &dbTx)
+			analysis, err := p.aiService.AnalyzeTransaction(ctx, &dbTx, ai.AnalysisOptions{
+				DocumentType:     opts.DocumentType,
+				TransactionHints: opts.TransactionInsights,
+				CategoryHints:    opts.CategoryInsights,
+			})
 			if err != nil {
 				p.logger.Error("failed to analyze transaction", "error", err)
 			} else {

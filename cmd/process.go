@@ -23,7 +23,12 @@ The command will:
 1. Extract text from documents
 2. Identify transactions using AI
 3. Categorize transactions using AI
-4. Store results in the database`,
+4. Store results in the database
+
+You can provide additional context about the documents using the following flags:
+--doc-type: Type of document (e.g., receipt, bank_statement, invoice)
+--transaction-insights: Additional context about the transactions
+--category-insights: Hints for transaction categorization`,
 	Args: cobra.ExactArgs(1),
 	RunE: runProcess,
 }
@@ -31,6 +36,9 @@ The command will:
 func init() {
 	rootCmd.AddCommand(processCmd)
 	processCmd.Flags().Bool("no-ai", false, "Skip AI categorization")
+	processCmd.Flags().String("doc-type", "", "Type of document (e.g., receipt, bank_statement, invoice)")
+	processCmd.Flags().String("transaction-insights", "", "Additional context about the transactions")
+	processCmd.Flags().String("category-insights", "", "Hints for transaction categorization")
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -41,7 +49,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path does not exist: %s", path)
 	}
 
-	// Initialize services
+	// Use global logger configured in root command
 	logger := slog.Default()
 
 	// Get database connection from global config
@@ -91,11 +99,23 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	pdfProcessor := docprocess.NewPDFProcessor(logger)
 	csvProcessor := processor.NewSEBProcessor(logger)
 
+	// Get insights from flags
+	docType, _ := cmd.Flags().GetString("doc-type")
+	transactionInsights, _ := cmd.Flags().GetString("transaction-insights")
+	categoryInsights, _ := cmd.Flags().GetString("category-insights")
+
+	// Create processing options
+	opts := pipeline.ProcessOptions{
+		DocumentType:        docType,
+		TransactionInsights: transactionInsights,
+		CategoryInsights:    categoryInsights,
+	}
+
 	// Create processing pipeline
 	p := pipeline.NewPipeline(pdfProcessor, csvProcessor, aiService, store, logger)
 
 	// Process documents
-	results, err := p.ProcessDocuments(cmd.Context(), path)
+	results, err := p.ProcessDocuments(cmd.Context(), path, opts)
 	if err != nil {
 		return fmt.Errorf("failed to process documents: %w", err)
 	}

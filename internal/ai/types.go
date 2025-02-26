@@ -36,9 +36,19 @@ type ModelExample struct {
 	Score  float64 `json:"score,omitempty"`
 }
 
+// AnalysisOptions contains runtime options for transaction analysis
+type AnalysisOptions struct {
+	// DocumentType specifies the type of document being processed
+	DocumentType string
+	// TransactionHints provides additional context about the transactions
+	TransactionHints string
+	// CategoryHints provides hints for transaction categorization
+	CategoryHints string
+}
+
 // Service defines the interface for AI operations
 type Service interface {
-	AnalyzeTransaction(ctx context.Context, tx *db.Transaction) (*Analysis, error)
+	AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts AnalysisOptions) (*Analysis, error)
 	ExtractDocument(ctx context.Context, doc *Document) (*Extraction, error)
 	SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error)
 }

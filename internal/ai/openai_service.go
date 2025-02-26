@@ -80,7 +80,7 @@ func NewOpenAIService(config Config, store db.Store, logger *slog.Logger) *OpenA
 }
 
 // AnalyzeTransaction analyzes a transaction using OpenAI's API.
-func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction) (*Analysis, error) {
+func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts AnalysisOptions) (*Analysis, error) {
 	template, err := s.promptMgr.GetPrompt(ctx, TransactionAnalysisPrompt)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -96,17 +96,23 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	}
 
 	data := struct {
-		Description string
-		Amount      string
-		Date        string
-		Rules       []Rule
-		Examples    []Example
+		Description     string
+		Amount          string
+		Date            string
+		Rules           []Rule
+		Examples        []Example
+		DocumentType    string
+		TransactionHint string
+		CategoryHint    string
 	}{
-		Description: tx.Description,
-		Amount:      fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency),
-		Date:        tx.TransactionDate.Format("2006-01-02"),
-		Rules:       template.Rules,
-		Examples:    template.Examples,
+		Description:     tx.Description,
+		Amount:          fmt.Sprintf("%s %s", tx.Amount.String(), tx.Currency),
+		Date:            tx.TransactionDate.Format("2006-01-02"),
+		Rules:           template.Rules,
+		Examples:        template.Examples,
+		DocumentType:    opts.DocumentType,
+		TransactionHint: opts.TransactionHints,
+		CategoryHint:    opts.CategoryHints,
 	}
 
 	prompt, err := template.Execute(data)
@@ -356,9 +362,12 @@ func (s *OpenAIService) makeRequest(ctx context.Context, payload any, out any, e
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return &RateLimitError{
-			Message:    "rate limit exceeded",
-			StatusCode: resp.StatusCode,
+		return &OperationError{
+			Operation: "makeRequest",
+			Err: &RateLimitError{
+				Message:    "rate limit exceeded",
+				StatusCode: resp.StatusCode,
+			},
 		}
 	}
 
@@ -408,4 +417,9 @@ func (s *OpenAIService) makeRequest(ctx context.Context, payload any, out any, e
 	}
 
 	return nil
+}
+
+// Add Unwrap method to OperationError to enable proper error checking
+func (e *OperationError) Unwrap() error {
+	return e.Err
 }

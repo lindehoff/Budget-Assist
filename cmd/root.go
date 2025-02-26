@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 
+	"log/slog"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -23,6 +25,20 @@ var rootCmd = &cobra.Command{
 	Long: `Budget-Assist is a command-line interface tool that helps you
 manage your personal finances efficiently. It provides features for
 importing transactions, categorizing expenses, and generating reports.`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Configure logging based on debug flag
+		opts := &slog.HandlerOptions{
+			Level: slog.LevelInfo, // Default level
+		}
+
+		if debug, _ := cmd.Flags().GetBool("debug"); debug {
+			opts.Level = slog.LevelDebug
+		}
+
+		// Configure global logger
+		logger := slog.New(slog.NewTextHandler(os.Stdout, opts))
+		slog.SetDefault(logger)
+	},
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	// Run: func(cmd *cobra.Command, args []string) { },
@@ -52,6 +68,7 @@ func init() {
 	// will be global for your application.
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.budgetassist.yaml)")
+	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug logging")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.

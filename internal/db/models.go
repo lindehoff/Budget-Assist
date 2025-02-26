@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -24,14 +25,12 @@ const (
 
 // Translation represents a localized name for an entity
 type Translation struct {
-	ID           uint      `gorm:"primarykey"`
-	EntityID     uint      `gorm:"not null"`
-	CreatedAt    time.Time `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
-	Name         string    `gorm:"not null;size:100"`
-	Description  string    `gorm:"size:500"`
-	EntityType   string    `gorm:"not null;size:50"`
-	LanguageCode string    `gorm:"not null;size:5"`
+	gorm.Model
+	EntityID     uint   `gorm:"not null"`
+	EntityType   string `gorm:"not null"`
+	LanguageCode string `gorm:"not null"`
+	Name         string `gorm:"not null"`
+	Description  string
 }
 
 // CategoryType represents different types of categories (e.g., VEHICLE, PROPERTY)
@@ -57,70 +56,126 @@ func (ct *CategoryType) GetTranslation(langCode string) string {
 	return ct.Name // Fallback to English name
 }
 
-// Category represents a specific instance of a category type
+// Category represents a main category
 type Category struct {
-	ID                 uint      `gorm:"primarykey"`
-	TypeID             uint      `gorm:"not null"`
-	CreatedAt          time.Time `gorm:"not null"`
-	UpdatedAt          time.Time `gorm:"not null"`
-	Name               string    `gorm:"not null;size:100"`
-	Description        string    `gorm:"size:500"`
-	InstanceIdentifier string    `gorm:"size:100"`
-	IsActive           bool      `gorm:"not null"`
-	Type               CategoryType
-	Transactions       []Transaction
-	Translations       []Translation `gorm:"polymorphic:Entity;polymorphicValue:category"`
+	gorm.Model
+	Name               string
+	Description        string
+	TypeID             uint `gorm:"not null"`
+	InstanceIdentifier string
+	IsActive           bool `gorm:"default:true"`
+	Subcategories      []CategorySubcategory
+	Translations       []Translation `gorm:"polymorphic:Entity"`
 }
 
-// GetTranslation returns the translated name for the specified language code
-func (c *Category) GetTranslation(langCode string) string {
+// BeforeCreate validates the category before creation
+func (c *Category) BeforeCreate(tx *gorm.DB) error {
+	if c.Name == "" && len(c.Translations) == 0 {
+		return fmt.Errorf("category name is required")
+	}
+	return nil
+}
+
+// GetName returns the translated name for the given language code
+func (c *Category) GetName(langCode string) string {
 	for _, t := range c.Translations {
 		if t.LanguageCode == langCode {
 			return t.Name
 		}
 	}
-	return c.Name // Fallback to English name
+	// Return first available translation if requested language not found
+	if len(c.Translations) > 0 {
+		return c.Translations[0].Name
+	}
+	return ""
 }
 
-// Subcategory represents subcategories within a category type
+// GetDescription returns the translated description for the given language code
+func (c *Category) GetDescription(langCode string) string {
+	for _, t := range c.Translations {
+		if t.LanguageCode == langCode {
+			return t.Description
+		}
+	}
+	// Return first available translation if requested language not found
+	if len(c.Translations) > 0 {
+		return c.Translations[0].Description
+	}
+	return ""
+}
+
+// Subcategory represents a subcategory that can be linked to multiple categories
 type Subcategory struct {
-	ID             uint      `gorm:"primarykey"`
-	CategoryTypeID uint      `gorm:"not null"`
-	CreatedAt      time.Time `gorm:"not null"`
-	UpdatedAt      time.Time `gorm:"not null"`
-	Name           string    `gorm:"not null;size:100"`
-	Description    string    `gorm:"size:500"`
-	IsSystem       bool      `gorm:"not null"`
-	CategoryType   CategoryType
-	Transactions   []Transaction
-	Translations   []Translation `gorm:"polymorphic:Entity;polymorphicValue:subcategory"`
+	gorm.Model
+	Name               string
+	Description        string
+	CategoryTypeID     uint
+	InstanceIdentifier string
+	IsActive           bool `gorm:"default:true"`
+	IsSystem           bool `gorm:"default:false"`
+	Categories         []CategorySubcategory
+	Translations       []Translation `gorm:"polymorphic:Entity"`
 }
 
-// GetTranslation returns the translated name for the specified language code
-func (s *Subcategory) GetTranslation(langCode string) string {
+// GetName returns the translated name for the given language code
+func (s *Subcategory) GetName(langCode string) string {
 	for _, t := range s.Translations {
 		if t.LanguageCode == langCode {
 			return t.Name
 		}
 	}
-	return s.Name // Fallback to English name
+	// Return first available translation if requested language not found
+	if len(s.Translations) > 0 {
+		return s.Translations[0].Name
+	}
+	return ""
+}
+
+// GetDescription returns the translated description for the given language code
+func (s *Subcategory) GetDescription(langCode string) string {
+	for _, t := range s.Translations {
+		if t.LanguageCode == langCode {
+			return t.Description
+		}
+	}
+	// Return first available translation if requested language not found
+	if len(s.Translations) > 0 {
+		return s.Translations[0].Description
+	}
+	return ""
+}
+
+// CategorySubcategory represents the many-to-many relationship between categories and subcategories
+type CategorySubcategory struct {
+	CategoryID    uint        `gorm:"primaryKey"`
+	SubcategoryID uint        `gorm:"primaryKey"`
+	IsActive      bool        `gorm:"default:true"`
+	Category      Category    `gorm:"constraint:OnDelete:CASCADE"`
+	Subcategory   Subcategory `gorm:"constraint:OnDelete:CASCADE"`
 }
 
 // Transaction represents a financial transaction
 type Transaction struct {
-	ID              uint `gorm:"primarykey"`
+	gorm.Model
+	Date            time.Time
+	TransactionDate time.Time
+	Amount          decimal.Decimal
+	Description     string
 	CategoryID      *uint
 	SubcategoryID   *uint
-	Amount          float64      `gorm:"not null"`
-	CreatedAt       time.Time    `gorm:"not null"`
-	UpdatedAt       time.Time    `gorm:"not null"`
-	TransactionDate time.Time    `gorm:"not null"`
-	Description     string       `gorm:"size:500"`
-	RawData         string       `gorm:"size:1000"`
-	AIAnalysis      string       `gorm:"size:1000"`
-	Currency        string       `gorm:"not null;size:3"`
 	Category        *Category    `gorm:"foreignKey:CategoryID"`
 	Subcategory     *Subcategory `gorm:"foreignKey:SubcategoryID"`
+	Source          string
+	Reference       string
+	RawData         string `gorm:"type:text"`
+	AIAnalysis      string `gorm:"type:text"`
+	Metadata        string `gorm:"type:json"`
+	Currency        string `gorm:"not null;size:3;default:'SEK'"`
+}
+
+// FormatAmount returns the amount formatted with the currency
+func (t *Transaction) FormatAmount() string {
+	return fmt.Sprintf("%s %s", t.Amount.String(), t.Currency)
 }
 
 // BeforeCreate hook to validate the currency

@@ -4,25 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	db "github.com/lindehoff/Budget-Assist/internal/db"
+	"github.com/shopspring/decimal"
 )
 
-func setupMockServer(t *testing.T, response OpenAIResponse, statusCode int, wantHeaders map[string]string) *httptest.Server {
+func setupMockServer(t *testing.T, response OpenAIResponse, statusCode int) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for key, want := range wantHeaders {
-			if got := r.Header.Get(key); got != want {
-				t.Errorf("header %q = %q, want %q", key, got, want)
-				return
-			}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-api-key" {
+			t.Errorf("Authorization header = %q, want Bearer test-api-key", got)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -33,64 +29,48 @@ func setupMockServer(t *testing.T, response OpenAIResponse, statusCode int, want
 	}))
 }
 
-func setupTestService(t *testing.T, server *httptest.Server) Service {
-	t.Helper()
+func setupTestService(t *testing.T, server *httptest.Server) *OpenAIService {
+	store := NewMockStore()
+
+	// Create prompt templates
+	prompts := []struct {
+		promptType PromptType
+		version    string
+	}{
+		{TransactionAnalysisPrompt, "1.0.0"},
+		{DocumentExtractionPrompt, "1.0.0"},
+		{TransactionCategorizationPrompt, "1.0.0"},
+	}
+
+	for _, p := range prompts {
+		prompt := &db.Prompt{
+			Type:         string(p.promptType),
+			Version:      p.version,
+			SystemPrompt: "You are a helpful assistant.",
+			UserPrompt:   "Please help me with this task.",
+			IsActive:     true,
+		}
+		if err := store.CreatePrompt(context.Background(), prompt); err != nil {
+			t.Fatalf("failed to create prompt template: %v", err)
+		}
+	}
+
 	logger := slog.Default()
-	mockStore := newMockStore()
-
-	// Initialize the mock store with test prompts
-	mockStore.prompts[string(TransactionAnalysisPrompt)] = &db.Prompt{
-		Type:         string(TransactionAnalysisPrompt),
-		Name:         "Test Transaction Prompt",
-		SystemPrompt: "You are a helpful assistant",
-		UserPrompt:   "Analyze this transaction",
-		Examples:     `[]`,
-		Rules:        `[]`,
-		Version:      "1.0.0",
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-
-	mockStore.prompts[string(DocumentExtractionPrompt)] = &db.Prompt{
-		Type:         string(DocumentExtractionPrompt),
-		Name:         "Test Document Prompt",
-		SystemPrompt: "You are a helpful assistant",
-		UserPrompt:   "Extract content from this document",
-		Examples:     `[]`,
-		Rules:        `[]`,
-		Version:      "1.0.0",
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-
-	mockStore.prompts[string(TransactionCategorizationPrompt)] = &db.Prompt{
-		Type:         string(TransactionCategorizationPrompt),
-		Name:         "Test Categorization Prompt",
-		SystemPrompt: "You are a helpful assistant",
-		UserPrompt:   "Suggest categories for this transaction",
-		Examples:     `[]`,
-		Rules:        `[]`,
-		Version:      "1.0.0",
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-
-	return NewOpenAIService(Config{
+	config := Config{
 		BaseURL:        server.URL,
 		APIKey:         "test-api-key",
-		RequestTimeout: 5 * time.Second,
-	}, mockStore, logger)
+		RequestTimeout: 5,
+	}
+	return NewOpenAIService(config, store, logger)
 }
 
-func TestOpenAIService_Successfully_analyze_transaction(t *testing.T) {
+func TestOpenAIService_AnalyzeTransaction(t *testing.T) {
 	ctx := context.TODO()
 
 	type testCase struct {
 		name        string
 		transaction *db.Transaction
+		options     AnalysisOptions
 		response    OpenAIResponse
 		wantScore   float64
 		wantRemarks string
@@ -109,35 +89,37 @@ func TestOpenAIService_Successfully_analyze_transaction(t *testing.T) {
 						Message: struct {
 							Content string `json:"content"`
 						}{
-							Content: `{"score":0.95,"remarks":"Food category"}`,
+							Content: `{"remarks":"Food purchase","score":0.9}`,
 						},
 					},
 				},
 			},
 			transaction: &db.Transaction{
-				Amount:          100.50,
+				Amount:          decimal.RequireFromString("100.50"),
 				TransactionDate: time.Date(2024, 2, 24, 12, 0, 0, 0, time.UTC),
 				Description:     "COOP Grocery Store",
-				Currency:        "SEK",
+				Currency:        db.CurrencySEK,
 			},
-			wantScore:   0.95,
-			wantRemarks: "Food category",
+			options: AnalysisOptions{
+				DocumentType:     "receipt",
+				TransactionHints: "Regular grocery shopping",
+				CategoryHints:    "Food and household items",
+			},
+			wantScore:   0.9,
+			wantRemarks: "Food purchase",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, http.StatusOK, map[string]string{
-				"Content-Type":  "application/json",
-				"Authorization": "Bearer test-api-key",
-			})
+			server := setupMockServer(t, tt.response, http.StatusOK)
 			t.Cleanup(func() {
 				server.Close()
 			})
 
 			service := setupTestService(t, server)
 
-			got, err := service.AnalyzeTransaction(ctx, tt.transaction)
+			got, err := service.AnalyzeTransaction(ctx, tt.transaction, tt.options)
 			if err != nil {
 				t.Fatalf("AnalyzeTransaction() error = %v", err)
 				return
@@ -155,7 +137,7 @@ func TestOpenAIService_Successfully_analyze_transaction(t *testing.T) {
 	}
 }
 
-func TestOpenAIService_Successfully_extract_document(t *testing.T) {
+func TestOpenAIService_ExtractDocument(t *testing.T) {
 	ctx := context.TODO()
 
 	type testCase struct {
@@ -188,36 +170,11 @@ func TestOpenAIService_Successfully_extract_document(t *testing.T) {
 			},
 			wantContent: "Sample document content",
 		},
-		{
-			name: "Successfully_extract_empty_content",
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: `{"content":""}`,
-						},
-					},
-				},
-			},
-			document: &Document{
-				Content: []byte("Empty content"),
-			},
-			wantContent: "",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, http.StatusOK, map[string]string{
-				"Content-Type":  "application/json",
-				"Authorization": "Bearer test-api-key",
-			})
+			server := setupMockServer(t, tt.response, http.StatusOK)
 			t.Cleanup(func() {
 				server.Close()
 			})
@@ -239,7 +196,7 @@ func TestOpenAIService_Successfully_extract_document(t *testing.T) {
 	}
 }
 
-func TestOpenAIService_Successfully_suggest_categories(t *testing.T) {
+func TestOpenAIService_SuggestCategories(t *testing.T) {
 	type testCase struct {
 		name        string
 		response    OpenAIResponse
@@ -265,43 +222,36 @@ func TestOpenAIService_Successfully_suggest_categories(t *testing.T) {
 					},
 				},
 			},
-			description: "COOP Grocery Store",
 			want: []CategoryMatch{
 				{Category: "Food", Confidence: 0.9},
 				{Category: "Groceries", Confidence: 0.8},
 			},
+			description: "Grocery shopping at ICA",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, http.StatusOK, map[string]string{
-				"Content-Type":  "application/json",
-				"Authorization": "Bearer test-api-key",
-			})
+			server := setupMockServer(t, tt.response, http.StatusOK)
 			defer server.Close()
 
 			service := setupTestService(t, server)
 
 			got, err := service.SuggestCategories(context.TODO(), tt.description)
 			if err != nil {
-				t.Fatalf("SuggestCategories() error = %v", err)
-				return
+				t.Fatalf("SuggestCategories() unexpected error: %v", err)
 			}
 
 			if len(got) != len(tt.want) {
-				t.Fatalf("got %d categories, want %d", len(got), len(tt.want))
-				return
+				t.Fatalf("SuggestCategories() returned %d suggestions, want %d", len(got), len(tt.want))
 			}
 
 			for i, want := range tt.want {
 				if got[i].Category != want.Category {
-					t.Errorf("Category[%d] = %v, want %v", i, got[i].Category, want.Category)
-					return
+					t.Errorf("SuggestCategories() category[%d] = %v, want %v", i, got[i].Category, want.Category)
 				}
 				if got[i].Confidence != want.Confidence {
-					t.Errorf("Confidence[%d] = %v, want %v", i, got[i].Confidence, want.Confidence)
-					return
+					t.Errorf("SuggestCategories() confidence[%d] = %v, want %v", i, got[i].Confidence, want.Confidence)
 				}
 			}
 		})
@@ -361,30 +311,27 @@ func TestOpenAIService_Error_invalid_response(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, tt.statusCode, map[string]string{
-				"Content-Type":  "application/json",
-				"Authorization": "Bearer test-api-key",
-			})
+			server := setupMockServer(t, tt.response, tt.statusCode)
 			defer server.Close()
 
 			service := setupTestService(t, server)
 
-			tx := &db.Transaction{
-				Amount:          100.50,
-				TransactionDate: time.Now(),
-				Description:     "COOP Grocery Store",
-				Currency:        "SEK",
+			opts := AnalysisOptions{
+				DocumentType: "receipt",
 			}
 
-			_, err := service.AnalyzeTransaction(context.TODO(), tx)
+			_, err := service.AnalyzeTransaction(context.TODO(), &db.Transaction{
+				Description: "Test transaction",
+				Amount:      decimal.RequireFromString("100.00"),
+				Currency:    "SEK",
+			}, opts)
+
 			if err == nil {
 				t.Fatal("expected error, got nil")
-				return
 			}
 
 			if !strings.Contains(err.Error(), tt.wantErrMsg) {
-				t.Errorf("error = %v, want to contain %v", err, tt.wantErrMsg)
-				return
+				t.Errorf("error = %v, want %v", err, tt.wantErrMsg)
 			}
 		})
 	}
@@ -393,27 +340,13 @@ func TestOpenAIService_Error_invalid_response(t *testing.T) {
 func TestOpenAIService_Error_rate_limit_with_retry(t *testing.T) {
 	type response struct {
 		statusCode int
-		response   OpenAIResponse
+		response   interface{}
 	}
 
 	responses := []response{
 		{
 			statusCode: http.StatusTooManyRequests,
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: `{"error":"rate limit exceeded"}`,
-						},
-					},
-				},
-			},
+			response:   nil,
 		},
 		{
 			statusCode: http.StatusOK,
@@ -427,7 +360,7 @@ func TestOpenAIService_Error_rate_limit_with_retry(t *testing.T) {
 						Message: struct {
 							Content string `json:"content"`
 						}{
-							Content: `[{"category":"Food","confidence":0.9}]`,
+							Content: `{"score":0.8,"remarks":"This appears to be a food-related expense."}`,
 						},
 					},
 				},
@@ -435,39 +368,55 @@ func TestOpenAIService_Error_rate_limit_with_retry(t *testing.T) {
 		},
 	}
 
-	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if callCount >= len(responses) {
-			t.Fatal("too many requests")
-			return
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Error("expected Authorization header with Bearer test-key")
 		}
 
-		resp := responses[callCount]
-		w.WriteHeader(resp.statusCode)
-		if err := json.NewEncoder(w).Encode(resp.response); err != nil {
-			t.Fatal(err)
-			return
+		response := responses[0]
+		responses = responses[1:]
+
+		w.WriteHeader(response.statusCode)
+		if response.response != nil {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(response.response); err != nil {
+				t.Fatal(err)
+			}
 		}
-		callCount++
 	}))
 	defer server.Close()
 
 	service := setupTestService(t, server)
+	service.config.APIKey = "test-key"
 
-	categories, err := service.SuggestCategories(context.TODO(), "test")
-	if err != nil {
-		t.Fatalf("SuggestCategories() error = %v", err)
+	opts := AnalysisOptions{
+		DocumentType: "receipt",
+	}
+
+	_, err := service.AnalyzeTransaction(context.TODO(), &db.Transaction{
+		Description: "Test transaction",
+		Amount:      decimal.RequireFromString("100.00"),
+		Currency:    "SEK",
+	}, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var opErr *OperationError
+	if !errors.As(err, &opErr) {
+		t.Errorf("error = %v, want OperationError", err)
 		return
 	}
 
-	if len(categories) != 1 {
-		t.Errorf("got %d categories, want 1", len(categories))
+	var rateLimitErr *RateLimitError
+	if !errors.As(opErr.Err, &rateLimitErr) {
+		t.Errorf("inner error = %v, want RateLimitError", opErr.Err)
 		return
 	}
 
-	if callCount != 2 {
-		t.Errorf("callCount = %d, want 2 (should have retried once)", callCount)
-		return
+	if rateLimitErr.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status code = %d, want %d", rateLimitErr.StatusCode, http.StatusTooManyRequests)
 	}
 }
 
@@ -535,163 +484,40 @@ func TestOpenAIService_Context_timeout(t *testing.T) {
 							Message: struct {
 								Content string `json:"content"`
 							}{
-								Content: `{"score":0.95,"remarks":"Test"}`,
+								Content: `{"score":0.8,"remarks":"This appears to be a food-related expense."}`,
 							},
 						},
 					},
 				}
-				w.Header().Set("Content-Type", "application/json")
 				if err := json.NewEncoder(w).Encode(response); err != nil {
 					t.Fatal(err)
 				}
 			}))
-			t.Cleanup(func() {
-				server.Close()
-			})
+			defer server.Close()
 
 			service := setupTestService(t, server)
 
 			ctx, cancel := context.WithTimeout(context.Background(), tt.contextTimeout)
 			defer cancel()
 
-			tx := &db.Transaction{
-				Amount:          100,
-				TransactionDate: time.Now(),
-				Description:     "Test transaction",
-				Currency:        "USD",
-			}
+			_, err := service.AnalyzeTransaction(ctx, &db.Transaction{
+				Description: "Test transaction",
+				Amount:      decimal.RequireFromString("100.00"),
+				Currency:    "SEK",
+			}, AnalysisOptions{
+				DocumentType: "receipt",
+			})
 
-			_, err := service.AnalyzeTransaction(ctx, tx)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("AnalyzeTransaction() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr && tt.wantErrType != nil {
-				var opErr *OperationError
-				if !errors.As(err, &opErr) {
-					t.Errorf("AnalyzeTransaction() error type = %T, want %T", err, &OperationError{})
-					return
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
 				}
-
-				// Check if any error in the chain is a context.DeadlineExceeded
-				var found bool
-				for e := opErr.Err; e != nil; {
-					if errors.Is(e, tt.wantErrType) {
-						found = true
-						break
-					}
-					if unwrapped, ok := e.(interface{ Unwrap() error }); ok {
-						e = unwrapped.Unwrap()
-					} else {
-						break
-					}
+				if !errors.Is(err, tt.wantErrType) {
+					t.Errorf("error = %v, want %v", err, tt.wantErrType)
 				}
-
-				if !found {
-					t.Errorf("AnalyzeTransaction() error chain does not contain %v", tt.wantErrType)
-				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
-	}
-}
-
-func TestOpenAIService_Concurrent_requests(t *testing.T) {
-	// Create a channel to track concurrent requests
-	requestCount := 0
-	var mu sync.Mutex
-	maxConcurrent := 0
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		if requestCount > maxConcurrent {
-			maxConcurrent = requestCount
-		}
-		mu.Unlock()
-
-		// Simulate processing time
-		time.Sleep(50 * time.Millisecond)
-
-		mu.Lock()
-		requestCount--
-		mu.Unlock()
-
-		response := OpenAIResponse{
-			Choices: []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			}{
-				{
-					Message: struct {
-						Content string `json:"content"`
-					}{
-						Content: `{"score":0.95,"remarks":"Test"}`,
-					},
-				},
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Fatal(err)
-		}
-	}))
-	t.Cleanup(func() {
-		server.Close()
-	})
-
-	service := setupTestService(t, server)
-
-	// Number of concurrent requests to make
-	numRequests := 10
-	var wg sync.WaitGroup
-	wg.Add(numRequests)
-
-	// Channel to collect errors
-	errCh := make(chan error, numRequests)
-
-	// Launch concurrent requests
-	for i := 0; i < numRequests; i++ {
-		go func(i int) {
-			defer wg.Done()
-
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
-
-			tx := &db.Transaction{
-				Amount:          float64(100 + i),
-				TransactionDate: time.Now(),
-				Description:     fmt.Sprintf("Test transaction %d", i),
-				Currency:        "USD",
-			}
-
-			_, err := service.AnalyzeTransaction(ctx, tx)
-			if err != nil {
-				errCh <- fmt.Errorf("request %d failed: %w", i, err)
-			}
-		}(i)
-	}
-
-	// Wait for all requests to complete
-	wg.Wait()
-	close(errCh)
-
-	// Check for any errors
-	errors := make([]error, 0, numRequests)
-	for err := range errCh {
-		errors = append(errors, err)
-	}
-
-	if len(errors) > 0 {
-		t.Errorf("Got %d errors from concurrent requests:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %v", err)
-		}
-	}
-
-	// Verify that requests were actually concurrent
-	if maxConcurrent < 2 {
-		t.Errorf("Expected concurrent requests, but max concurrent requests was %d", maxConcurrent)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/spf13/cobra"
@@ -269,6 +270,88 @@ This command allows you to:
 	},
 }
 
+// promptImportCmd represents the prompt import subcommand
+var promptImportCmd = &cobra.Command{
+	Use:   "import [file]",
+	Short: "Import prompt templates from a JSON file",
+	Long: `Import prompt templates from a JSON file.
+	
+The file should contain a JSON array of prompt templates with:
+- Type and name
+- System and user prompts
+- Optional examples and rules
+- Language translations`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		filePath := args[0]
+
+		// Read and parse the JSON file
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return &PromptError{
+				Operation: "import",
+				Prompt:    filePath,
+				Err:       fmt.Errorf("failed to read file: %w", err),
+			}
+		}
+
+		var templates struct {
+			Prompts []struct {
+				Type         string `json:"type"`
+				Name         string `json:"name"`
+				Translations map[string]struct {
+					Name         string `json:"name"`
+					SystemPrompt string `json:"system_prompt"`
+					UserPrompt   string `json:"user_prompt"`
+				} `json:"translations"`
+				Version  string `json:"version"`
+				IsActive bool   `json:"is_active"`
+			} `json:"prompts"`
+		}
+		if err := json.Unmarshal(data, &templates); err != nil {
+			return &PromptError{
+				Operation: "import",
+				Prompt:    filePath,
+				Err:       fmt.Errorf("failed to parse JSON: %w", err),
+			}
+		}
+
+		// Import each prompt template
+		for _, p := range templates.Prompts {
+			// Use English as the default language if available, otherwise use Swedish
+			var defaultLang string
+			if _, ok := p.Translations["en"]; ok {
+				defaultLang = "en"
+			} else if _, ok := p.Translations["sv"]; ok {
+				defaultLang = "sv"
+			} else {
+				return &PromptError{
+					Operation: "import",
+					Prompt:    p.Name,
+					Err:       fmt.Errorf("no valid translation found (requires either English or Swedish)"),
+				}
+			}
+
+			template := ai.NewPromptTemplate(ai.PromptType(p.Type), p.Name)
+			template.SystemPrompt = p.Translations[defaultLang].SystemPrompt
+			template.UserPrompt = p.Translations[defaultLang].UserPrompt
+			template.Version = p.Version
+			template.IsActive = p.IsActive
+
+			if err := promptManager.UpdatePrompt(cmd.Context(), template); err != nil {
+				return &PromptError{
+					Operation: "import",
+					Prompt:    p.Name,
+					Err:       err,
+				}
+			}
+			fmt.Printf("Successfully imported prompt template %q of type %q\n", template.Name, template.Type)
+		}
+
+		return nil
+	},
+}
+
 func outputPromptTable(prompts []*ai.PromptTemplate) error {
 	table := newTable()
 	table.SetHeader([]string{"Type", "Name", "Version", "Active", "Updated"})
@@ -296,6 +379,7 @@ func init() {
 	promptCmd.AddCommand(promptAddCmd)
 	promptCmd.AddCommand(promptUpdateCmd)
 	promptCmd.AddCommand(promptTestCmd)
+	promptCmd.AddCommand(promptImportCmd)
 	rootCmd.AddCommand(promptCmd)
 
 	// Add flags for the list command

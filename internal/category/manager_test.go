@@ -14,117 +14,9 @@ import (
 	"github.com/lindehoff/Budget-Assist/internal/db"
 )
 
-// mockStore implements db.Store interface for testing
-type mockStore struct {
-	categories   map[uint]*db.Category
-	translations map[uint][]db.Translation
-	nextID       uint
-	mu           sync.RWMutex
-}
-
-func newMockStore() db.Store {
-	return &mockStore{
-		categories:   make(map[uint]*db.Category),
-		translations: make(map[uint][]db.Translation),
-		nextID:       1,
-	}
-}
-
-func (m *mockStore) CreateCategory(ctx context.Context, category *db.Category) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	category.ID = m.nextID
-	category.CreatedAt = time.Now()
-	category.UpdatedAt = time.Now()
-	m.categories[category.ID] = category
-	m.nextID++
-	return nil
-}
-
-func (m *mockStore) UpdateCategory(ctx context.Context, category *db.Category) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, exists := m.categories[category.ID]; !exists {
-		return db.ErrNotFound
-	}
-	category.UpdatedAt = time.Now()
-	m.categories[category.ID] = category
-	return nil
-}
-
-func (m *mockStore) GetCategoryByID(ctx context.Context, id uint) (*db.Category, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if category, exists := m.categories[id]; exists {
-		return category, nil
-	}
-	return nil, db.ErrNotFound
-}
-
-func (m *mockStore) ListCategories(ctx context.Context, typeID *uint) ([]db.Category, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var categories []db.Category
-	for _, cat := range m.categories {
-		if typeID == nil || cat.TypeID == *typeID {
-			categories = append(categories, *cat)
-		}
-	}
-	return categories, nil
-}
-
-func (m *mockStore) CreateTranslation(ctx context.Context, translation *db.Translation) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.translations[translation.EntityID] = append(m.translations[translation.EntityID], *translation)
-	return nil
-}
-
-func (m *mockStore) GetTranslations(ctx context.Context, entityID uint, entityType string) ([]db.Translation, error) {
-	return m.translations[entityID], nil
-}
-
-func (m *mockStore) DeleteCategory(ctx context.Context, id uint) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, exists := m.categories[id]; !exists {
-		return db.ErrNotFound
-	}
-	delete(m.categories, id)
-	return nil
-}
-
-func (m *mockStore) GetCategoryTypeByID(ctx context.Context, id uint) (*db.CategoryType, error) {
-	// For testing, we'll return a simple category type
-	if id == 1 {
-		return &db.CategoryType{
-			ID:          1,
-			Name:        "Expense",
-			Description: "Expense category type",
-		}, nil
-	}
-	return nil, db.ErrNotFound
-}
-
-func (m *mockStore) GetPromptByType(ctx context.Context, promptType string) (*db.Prompt, error) {
-	return nil, nil
-}
-
-func (m *mockStore) UpdatePrompt(ctx context.Context, prompt *db.Prompt) error {
-	return nil
-}
-
-func (m *mockStore) ListPrompts(ctx context.Context) ([]db.Prompt, error) {
-	return nil, nil
-}
-
-func (m *mockStore) StoreTransaction(ctx context.Context, tx *db.Transaction) error {
-	return nil
-}
-
 type mockAIService struct{}
 
-func (m *mockAIService) AnalyzeTransaction(ctx context.Context, _ *db.Transaction) (*ai.Analysis, error) {
+func (m *mockAIService) AnalyzeTransaction(ctx context.Context, _ *db.Transaction, _ ai.AnalysisOptions) (*ai.Analysis, error) {
 	return &ai.Analysis{
 		Remarks: "Test analysis",
 		Score:   0.95,
@@ -154,14 +46,17 @@ type mockAIServiceWithError struct {
 	mockAIService
 }
 
+func (m *mockAIServiceWithError) AnalyzeTransaction(ctx context.Context, _ *db.Transaction, _ ai.AnalysisOptions) (*ai.Analysis, error) {
+	return nil, fmt.Errorf("AI service error")
+}
+
 func (m *mockAIServiceWithError) SuggestCategories(ctx context.Context, description string) ([]ai.CategoryMatch, error) {
 	return nil, fmt.Errorf("AI service error")
 }
 
 // createTestManager creates a new manager with mock dependencies for testing
-func createTestManager(t *testing.T) (*Manager, db.Store) {
-	t.Helper()
-	store := newMockStore()
+func createTestManager() (*Manager, db.Store) {
+	store := ai.NewMockStore()
 	aiService := &mockAIService{}
 	logger := slog.Default()
 	return NewManager(store, aiService, logger), store
@@ -190,7 +85,7 @@ func TestCreateCategory(t *testing.T) {
 	// - Testing with parent context values
 	ctx := context.TODO()
 
-	manager, _ := createTestManager(t)
+	manager, _ := createTestManager()
 
 	tests := []struct {
 		name        string
@@ -298,7 +193,7 @@ func TestUpdateCategory(t *testing.T) {
 	// - Testing with parent context values
 	ctx := context.TODO()
 
-	manager, store := createTestManager(t)
+	manager, store := createTestManager()
 	existingCategory := createTestCategory(t, store, "Original", 1)
 
 	tests := []struct {
@@ -391,7 +286,7 @@ func TestSuggestCategory(t *testing.T) {
 	// - Testing with parent context values
 	ctx := context.TODO()
 
-	manager, _ := createTestManager(t)
+	manager, _ := createTestManager()
 
 	tests := []struct {
 		name          string
@@ -493,7 +388,7 @@ func TestCategoryError_Error(t *testing.T) {
 }
 
 func TestGetCategoryByID(t *testing.T) {
-	manager, store := createTestManager(t)
+	manager, store := createTestManager()
 	existingCategory := createTestCategory(t, store, "Test", 1)
 
 	tests := []struct {
@@ -508,7 +403,7 @@ func TestGetCategoryByID(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "Error_get_non_existent_category",
+			name:        "GetCategoryByID_error_non_existent_category",
 			id:          999,
 			wantErr:     true,
 			expectedErr: db.ErrNotFound,
@@ -517,20 +412,23 @@ func TestGetCategoryByID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			category, err := manager.GetCategoryByID(context.Background(), tt.id)
+			ctx := context.TODO()
+
+			category, err := manager.GetCategoryByID(ctx, tt.id)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GetCategoryByID() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("GetCategoryByID() error = %v, wantErr %v (input: %d)", err, tt.wantErr, tt.id)
 				return
 			}
 			if tt.wantErr {
 				var categoryErr CategoryError
 				if !errors.As(err, &categoryErr) {
-					t.Errorf("GetCategoryByID() error type = %T, want CategoryError", err)
+					t.Errorf("GetCategoryByID() error type = %T, want CategoryError (input: %d)", err, tt.id)
 					return
 				}
 				if tt.expectedErr != nil && !errors.Is(categoryErr.Err, tt.expectedErr) {
-					t.Errorf("GetCategoryByID() error = %v, expectedErr %v", categoryErr.Err, tt.expectedErr)
+					t.Errorf("GetCategoryByID() error = %v, expectedErr %v (input: %d)",
+						categoryErr.Err, tt.expectedErr, tt.id)
 				}
 				return
 			}
@@ -540,14 +438,16 @@ func TestGetCategoryByID(t *testing.T) {
 			}
 
 			if category.ID != tt.id {
-				t.Errorf("GetCategoryByID() category ID = %v, want %v", category.ID, tt.id)
+				t.Errorf("GetCategoryByID() category ID = %v, want %v (input: %d)",
+					category.ID, tt.id, tt.id)
+				return
 			}
 		})
 	}
 }
 
 func TestListCategories(t *testing.T) {
-	manager, store := createTestManager(t)
+	manager, store := createTestManager()
 
 	// Create test categories
 	_ = createTestCategory(t, store, "Food", 1)
@@ -658,7 +558,7 @@ func TestCreateTranslations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &mockStoreWithErrors{Store: newMockStore(), shouldError: tt.shouldError}
+			store := &mockStoreWithErrors{Store: ai.NewMockStore(), shouldError: tt.shouldError}
 			manager := NewManager(store, &mockAIService{}, slog.Default())
 
 			err := manager.createTranslations(context.Background(), 1, tt.translations)
@@ -671,7 +571,7 @@ func TestCreateTranslations(t *testing.T) {
 }
 
 func TestSuggestCategory_Error(t *testing.T) {
-	manager := NewManager(newMockStore(), &mockAIServiceWithError{}, slog.Default())
+	manager := NewManager(ai.NewMockStore(), &mockAIServiceWithError{}, slog.Default())
 
 	_, err := manager.SuggestCategory(context.Background(), "test description")
 
@@ -693,7 +593,7 @@ func TestSuggestCategory_Error(t *testing.T) {
 
 // TestConcurrent_category_operations tests the manager's behavior under concurrent load
 func TestConcurrent_category_operations(t *testing.T) {
-	manager, _ := createTestManager(t)
+	manager, _ := createTestManager()
 	numOperations := 5
 	var wg sync.WaitGroup
 	wg.Add(numOperations * 2)

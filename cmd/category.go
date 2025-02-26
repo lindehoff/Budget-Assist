@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strconv"
 
 	"github.com/lindehoff/Budget-Assist/internal/category"
@@ -248,6 +250,116 @@ This ensures that historical transactions maintain their categorization.`,
 	},
 }
 
+// categoryImportCmd represents the category import subcommand
+var categoryImportCmd = &cobra.Command{
+	Use:   "import [file]",
+	Short: "Import categories from a JSON file",
+	Long: `Import categories from a JSON file.
+	
+The file should contain a JSON array of categories with:
+- Name and description
+- Parent category (if any)
+- Translations in different languages
+- Subcategories`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		filePath := args[0]
+
+		// Read and parse the JSON file
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return &CategoryError{
+				Operation: "import",
+				Category:  filePath,
+				Err:       fmt.Errorf("failed to read file: %w", err),
+			}
+		}
+
+		var categories struct {
+			Categories []struct {
+				Name         string `json:"name"`
+				Translations map[string]struct {
+					Name        string `json:"name"`
+					Description string `json:"description"`
+				} `json:"translations"`
+				Subcategories []struct {
+					Name         string `json:"name"`
+					Translations map[string]struct {
+						Name        string `json:"name"`
+						Description string `json:"description"`
+					} `json:"translations"`
+				} `json:"subcategories"`
+			} `json:"categories"`
+		}
+		if err := json.Unmarshal(data, &categories); err != nil {
+			return &CategoryError{
+				Operation: "import",
+				Category:  filePath,
+				Err:       fmt.Errorf("failed to parse JSON: %w", err),
+			}
+		}
+
+		// Import each category
+		for _, cat := range categories.Categories {
+			// Create main category
+			translations := make(map[string]category.TranslationData)
+			for lang, trans := range cat.Translations {
+				translations[lang] = category.TranslationData{
+					Name:        trans.Name,
+					Description: trans.Description,
+				}
+			}
+
+			req := category.CreateCategoryRequest{
+				Name:         cat.Name,
+				Description:  cat.Translations["sv"].Description, // Use Swedish as default
+				TypeID:       1,                                  // Default to expense type
+				Translations: translations,
+			}
+
+			mainCat, err := categoryManager.CreateCategory(cmd.Context(), req)
+			if err != nil {
+				return &CategoryError{
+					Operation: "import",
+					Category:  cat.Name,
+					Err:       err,
+				}
+			}
+			fmt.Printf("Successfully imported category %q\n", mainCat.Name)
+
+			// Create subcategories
+			for _, subcat := range cat.Subcategories {
+				translations := make(map[string]category.TranslationData)
+				for lang, trans := range subcat.Translations {
+					translations[lang] = category.TranslationData{
+						Name:        trans.Name,
+						Description: trans.Description,
+					}
+				}
+
+				req := category.CreateCategoryRequest{
+					Name:         subcat.Name,
+					Description:  subcat.Translations["sv"].Description, // Use Swedish as default
+					TypeID:       1,                                     // Default to expense type
+					Translations: translations,
+				}
+
+				subcatObj, err := categoryManager.CreateCategory(cmd.Context(), req)
+				if err != nil {
+					return &CategoryError{
+						Operation: "import",
+						Category:  subcat.Name,
+						Err:       err,
+					}
+				}
+				fmt.Printf("Successfully imported subcategory %q under %q\n", subcatObj.Name, mainCat.Name)
+			}
+		}
+
+		return nil
+	},
+}
+
 func parseID(s string) (uint, error) {
 	id, err := strconv.ParseUint(s, 10, 32)
 	if err != nil {
@@ -261,6 +373,7 @@ func init() {
 	categoryCmd.AddCommand(categoryAddCmd)
 	categoryCmd.AddCommand(categoryUpdateCmd)
 	categoryCmd.AddCommand(categoryDeleteCmd)
+	categoryCmd.AddCommand(categoryImportCmd)
 	rootCmd.AddCommand(categoryCmd)
 
 	// Add flags for the list command
@@ -288,7 +401,6 @@ func init() {
 	// Add flags for the delete command
 	categoryDeleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
 }
-
 func outputJSON(categories []db.Category) error {
 	return printJSON(categories)
 }

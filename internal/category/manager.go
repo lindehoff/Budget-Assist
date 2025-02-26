@@ -2,6 +2,7 @@ package category
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/lindehoff/Budget-Assist/internal/db"
 )
 
-// Manager handles category operations and synchronization between DB and AI models
+// Manager handles category operations
 type Manager struct {
 	store     db.Store
 	aiService ai.Service
@@ -36,9 +37,55 @@ func NewManager(store db.Store, aiService ai.Service, logger *slog.Logger) *Mana
 	}
 }
 
-// CreateCategory creates a new category with the given details
+// CreateCategoryRequest represents the data needed to create a new category
+type CreateCategoryRequest struct {
+	Name               string
+	Description        string
+	TypeID             uint
+	InstanceIdentifier string
+	Translations       map[string]TranslationData
+	Subcategories      []uint // List of subcategory IDs to link
+}
+
+// CreateSubcategoryRequest represents the data needed to create a new subcategory
+type CreateSubcategoryRequest struct {
+	Name               string
+	Description        string
+	InstanceIdentifier string
+	Translations       map[string]TranslationData
+	Categories         []uint // List of category IDs to link
+}
+
+// TranslationData represents translation information
+type TranslationData struct {
+	Name        string
+	Description string
+}
+
+// UpdateCategoryRequest represents the data needed to update a category
+type UpdateCategoryRequest struct {
+	Name                string
+	Description         string
+	IsActive            *bool
+	InstanceIdentifier  string
+	Translations        map[string]TranslationData
+	AddSubcategories    []uint // Subcategories to add
+	RemoveSubcategories []uint // Subcategories to remove
+}
+
+// UpdateSubcategoryRequest represents the data needed to update a subcategory
+type UpdateSubcategoryRequest struct {
+	Name               string
+	Description        string
+	IsActive           *bool
+	InstanceIdentifier string
+	Translations       map[string]TranslationData
+	AddCategories      []uint // Categories to add
+	RemoveCategories   []uint // Categories to remove
+}
+
+// CreateCategory creates a new category
 func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest) (*db.Category, error) {
-	// Validate request
 	if err := req.Validate(); err != nil {
 		return nil, CategoryError{
 			Operation: "create",
@@ -47,15 +94,27 @@ func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest)
 		}
 	}
 
-	// Create category in DB
+	// Create the category
 	category := &db.Category{
+		TypeID:             req.TypeID,
+		InstanceIdentifier: req.InstanceIdentifier,
+		IsActive:           true,
 		Name:               req.Name,
 		Description:        req.Description,
-		TypeID:             req.TypeID,
-		IsActive:           true,
-		InstanceIdentifier: req.InstanceIdentifier,
 	}
 
+	// Create translations
+	for langCode, data := range req.Translations {
+		translation := &db.Translation{
+			EntityType:   "category",
+			LanguageCode: langCode,
+			Name:         data.Name,
+			Description:  data.Description,
+		}
+		category.Translations = append(category.Translations, *translation)
+	}
+
+	// Create category first
 	if err := m.store.CreateCategory(ctx, category); err != nil {
 		return nil, CategoryError{
 			Operation: "create",
@@ -64,30 +123,120 @@ func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest)
 		}
 	}
 
-	// Create translations if provided
-	if len(req.Translations) > 0 {
-		if err := m.createTranslations(ctx, category.ID, req.Translations); err != nil {
-			m.logger.Error("failed to create translations",
-				"category", category.Name,
-				"error", err)
+	// Link subcategories if provided
+	if len(req.Subcategories) > 0 {
+		for _, subcatID := range req.Subcategories {
+			link := &db.CategorySubcategory{
+				CategoryID:    category.ID,
+				SubcategoryID: subcatID,
+				IsActive:      true,
+			}
+			if err := m.store.CreateCategorySubcategory(ctx, link); err != nil {
+				m.logger.Error("failed to link subcategory",
+					"category_id", category.ID,
+					"subcategory_id", subcatID,
+					"error", err)
+			}
 		}
 	}
 
 	return category, nil
 }
 
-// UpdateCategory updates an existing category
-func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategoryRequest) (*db.Category, error) {
-	category, err := m.store.GetCategoryByID(ctx, id)
-	if err != nil {
+// CreateSubcategory creates a new subcategory
+func (m *Manager) CreateSubcategory(ctx context.Context, req CreateSubcategoryRequest) (*db.Subcategory, error) {
+	if err := req.Validate(); err != nil {
 		return nil, CategoryError{
-			Operation: "update",
-			Category:  fmt.Sprintf("id=%d", id),
+			Operation: "create_subcategory",
+			Category:  req.Name,
 			Err:       err,
 		}
 	}
 
-	// Update fields if provided
+	// Create the subcategory
+	subcategory := &db.Subcategory{
+		InstanceIdentifier: req.InstanceIdentifier,
+		IsActive:           true,
+	}
+
+	// Create translations
+	for langCode, data := range req.Translations {
+		translation := &db.Translation{
+			EntityType:   "subcategory",
+			LanguageCode: langCode,
+			Name:         data.Name,
+			Description:  data.Description,
+		}
+		subcategory.Translations = append(subcategory.Translations, *translation)
+	}
+
+	// Create subcategory first
+	if err := m.store.CreateSubcategory(ctx, subcategory); err != nil {
+		return nil, CategoryError{
+			Operation: "create_subcategory",
+			Category:  req.Name,
+			Err:       err,
+		}
+	}
+
+	// Link categories if provided
+	if len(req.Categories) > 0 {
+		for _, catID := range req.Categories {
+			link := &db.CategorySubcategory{
+				CategoryID:    catID,
+				SubcategoryID: subcategory.ID,
+				IsActive:      true,
+			}
+			if err := m.store.CreateCategorySubcategory(ctx, link); err != nil {
+				m.logger.Error("failed to link category",
+					"category_id", catID,
+					"subcategory_id", subcategory.ID,
+					"error", err)
+			}
+		}
+	}
+
+	return subcategory, nil
+}
+
+// UpdateCategory updates an existing category
+func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategoryRequest) (*db.Category, error) {
+	category, err := m.store.GetCategoryByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, CategoryError{
+				Operation: "update",
+				Category:  fmt.Sprintf("id=%d", id),
+				Err:       db.ErrNotFound,
+			}
+		}
+		return nil, CategoryError{
+			Operation: "update",
+			Category:  fmt.Sprintf("id=%d", id),
+			Err:       fmt.Errorf("failed to get category: %w", err),
+		}
+	}
+
+	// Update translations if provided
+	if len(req.Translations) > 0 {
+		for langCode, data := range req.Translations {
+			translation := &db.Translation{
+				EntityID:     category.ID,
+				EntityType:   "category",
+				LanguageCode: langCode,
+				Name:         data.Name,
+				Description:  data.Description,
+			}
+			if err := m.store.CreateTranslation(ctx, translation); err != nil {
+				m.logger.Error("failed to update translation",
+					"category_id", category.ID,
+					"language", langCode,
+					"error", err)
+			}
+		}
+	}
+
+	// Update other fields
 	if req.Name != "" {
 		category.Name = req.Name
 	}
@@ -97,12 +246,44 @@ func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategor
 	if req.IsActive != nil {
 		category.IsActive = *req.IsActive
 	}
+	if req.InstanceIdentifier != "" {
+		category.InstanceIdentifier = req.InstanceIdentifier
+	}
 
+	// Update category-subcategory relationships
+	if len(req.AddSubcategories) > 0 {
+		for _, subcatID := range req.AddSubcategories {
+			link := &db.CategorySubcategory{
+				CategoryID:    category.ID,
+				SubcategoryID: subcatID,
+				IsActive:      true,
+			}
+			if err := m.store.CreateCategorySubcategory(ctx, link); err != nil {
+				m.logger.Error("failed to add subcategory link",
+					"category_id", category.ID,
+					"subcategory_id", subcatID,
+					"error", err)
+			}
+		}
+	}
+
+	if len(req.RemoveSubcategories) > 0 {
+		for _, subcatID := range req.RemoveSubcategories {
+			if err := m.store.DeleteCategorySubcategory(ctx, category.ID, subcatID); err != nil {
+				m.logger.Error("failed to remove subcategory link",
+					"category_id", category.ID,
+					"subcategory_id", subcatID,
+					"error", err)
+			}
+		}
+	}
+
+	// Save the updated category
 	if err := m.store.UpdateCategory(ctx, category); err != nil {
 		return nil, CategoryError{
 			Operation: "update",
-			Category:  category.Name,
-			Err:       err,
+			Category:  fmt.Sprintf("id=%d", id),
+			Err:       fmt.Errorf("failed to update category: %w", err),
 		}
 	}
 
@@ -135,6 +316,32 @@ func (m *Manager) ListCategories(ctx context.Context, typeID *uint) ([]db.Catego
 	return categories, nil
 }
 
+// GetSubcategoryByID retrieves a subcategory by its ID
+func (m *Manager) GetSubcategoryByID(ctx context.Context, id uint) (*db.Subcategory, error) {
+	subcategory, err := m.store.GetSubcategoryByID(ctx, id)
+	if err != nil {
+		return nil, CategoryError{
+			Operation: "get_subcategory",
+			Category:  fmt.Sprintf("id=%d", id),
+			Err:       err,
+		}
+	}
+	return subcategory, nil
+}
+
+// ListSubcategories returns all subcategories
+func (m *Manager) ListSubcategories(ctx context.Context) ([]db.Subcategory, error) {
+	subcategories, err := m.store.ListSubcategories(ctx)
+	if err != nil {
+		return nil, CategoryError{
+			Operation: "list_subcategories",
+			Category:  "all",
+			Err:       err,
+		}
+	}
+	return subcategories, nil
+}
+
 // SuggestCategory suggests a category for a transaction description
 func (m *Manager) SuggestCategory(ctx context.Context, description string) ([]CategorySuggestion, error) {
 	matches, err := m.aiService.SuggestCategories(ctx, description)
@@ -157,28 +364,6 @@ func (m *Manager) SuggestCategory(ctx context.Context, description string) ([]Ca
 	return suggestions, nil
 }
 
-// CreateCategoryRequest represents the data needed to create a new category
-type CreateCategoryRequest struct {
-	Name               string
-	Description        string
-	TypeID             uint
-	InstanceIdentifier string
-	Translations       map[string]TranslationData
-}
-
-// TranslationData represents translation information
-type TranslationData struct {
-	Name        string
-	Description string
-}
-
-// UpdateCategoryRequest represents the data needed to update a category
-type UpdateCategoryRequest struct {
-	Name        string
-	Description string
-	IsActive    *bool
-}
-
 // CategorySuggestion represents an AI-suggested category with confidence
 type CategorySuggestion struct {
 	CategoryPath string
@@ -191,6 +376,13 @@ func (r *CreateCategoryRequest) Validate() error {
 	}
 	if r.TypeID == 0 {
 		return fmt.Errorf("type ID is required")
+	}
+	return nil
+}
+
+func (r *CreateSubcategoryRequest) Validate() error {
+	if len(r.Translations) == 0 {
+		return fmt.Errorf("at least one translation is required")
 	}
 	return nil
 }

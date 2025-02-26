@@ -132,18 +132,42 @@ func TestStatusErrors(t *testing.T) {
 		statusCode int
 		wantError  error
 	}{
-		{"BadRequest", http.StatusBadRequest, ErrInvalidRequest},
-		{"Unauthorized", http.StatusUnauthorized, ErrUnauthorized},
-		{"Forbidden", http.StatusForbidden, ErrForbidden},
-		{"NotFound", http.StatusNotFound, ErrNotFound},
-		{"MethodNotAllowed", http.StatusMethodNotAllowed, ErrMethodNotAllowed},
-		{"Conflict", http.StatusConflict, ErrConflict},
+		{
+			name:       "Successfully_map_BadRequest_status",
+			statusCode: http.StatusBadRequest,
+			wantError:  ErrInvalidRequest,
+		},
+		{
+			name:       "Successfully_map_Unauthorized_status",
+			statusCode: http.StatusUnauthorized,
+			wantError:  ErrUnauthorized,
+		},
+		{
+			name:       "Successfully_map_Forbidden_status",
+			statusCode: http.StatusForbidden,
+			wantError:  ErrForbidden,
+		},
+		{
+			name:       "Successfully_map_NotFound_status",
+			statusCode: http.StatusNotFound,
+			wantError:  ErrNotFound,
+		},
+		{
+			name:       "Successfully_map_MethodNotAllowed_status",
+			statusCode: http.StatusMethodNotAllowed,
+			wantError:  ErrMethodNotAllowed,
+		},
+		{
+			name:       "Successfully_map_Conflict_status",
+			statusCode: http.StatusConflict,
+			wantError:  ErrConflict,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := StatusErrors[tt.statusCode]; got != tt.wantError {
-				t.Errorf("StatusErrors[%v] = %v, want %v", tt.statusCode, got, tt.wantError)
+				t.Errorf("StatusErrors[%d] = %v, want %v", tt.statusCode, got, tt.wantError)
 			}
 		})
 	}
