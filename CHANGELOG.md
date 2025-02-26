@@ -1,5 +1,14 @@
 # Budget-Assist Changelog
 
+## 2.6.0 (2025-02-26)
+
+* Enhance document processing capabilities 📄✨ ([](https://github.com/lindehoff/Budget-Assist/commit/76d0e83c4548fe2d06fe963eb9c2a34f007fdc6d))
+  - Add support for processing bank statements and CSV files.
+- Implement prompts for bank statement extraction and CSV transaction analysis.
+- Update CLI commands to include processing for bank statements and CSV files.
+- Improve transaction categorization prompts for clarity and structure.
+- Ensure successful integration of AI services for transaction analysis.
+
 ## 2.5.0 (2025-02-25)
 
 * Enhance OpenAI integration and document processing capabilities 🎉 ([](https://github.com/lindehoff/Budget-Assist/commit/5ec5c3184b8eabba2ed376bab20e59ea6c7eec58))
