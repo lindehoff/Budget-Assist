@@ -1,5 +1,20 @@
 # Budget-Assist Changelog
 
+## <small>2.6.1 (2025-02-26)</small>
+
+* **design:** update CLI design for runtime user insights ([](https://github.com/lindehoff/Budget-Assist/commit/b8885b74fff941d6549a03c3a30bcc1b1703f3dd))
+  • Update System Architecture to include runtime user insights in process command
+• Update AI Integration design to handle runtime insights during processing
+• Update Implementation Plan to focus on runtime insights integration
+• Remove stored user insights from prompt management
+
+Changes:
+- Add ProcessOptions with runtime insight fields
+- Update AI service interface for runtime insights
+- Add document processing pipeline flow
+- Add example CLI usage with insights
+- Update implementation tasks and timeline
+
 ## 2.6.0 (2025-02-26)
 
 * Enhance document processing capabilities 📄✨ ([](https://github.com/lindehoff/Budget-Assist/commit/76d0e83c4548fe2d06fe963eb9c2a34f007fdc6d))
