@@ -7,7 +7,7 @@
 *.dll
 *.so
 *.dylib
-/budgetassist
+/budget-assist
 
 # Test binary, built with `go test -c`
 *.test
@@ -73,7 +73,7 @@ config.local.yaml
 tmp/
 
 # Project specific
-/budgetassist.exe
+/budget-assist.exe
 
 # Node.js dependencies
 node_modules/

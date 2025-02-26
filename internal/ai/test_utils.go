@@ -67,3 +67,7 @@ func (m *mockStore) ListPrompts(ctx context.Context) ([]db.Prompt, error) {
 	}
 	return prompts, nil
 }
+
+func (m *mockStore) StoreTransaction(ctx context.Context, tx *db.Transaction) error {
+	return nil
+}

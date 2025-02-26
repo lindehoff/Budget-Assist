@@ -67,6 +67,24 @@ func TestSEBProcessor_Successfully_process_valid_transactions(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Successfully_process_file_with_bom",
+			input: "\uFEFFBokföringsdatum;Valutadatum;Verifikationsnummer;Text;Belopp;Saldo\n" +
+				"2025-02-24;2025-02-22;5490990004;56130086210 ;-1000.000;2814.160",
+			want: []Transaction{
+				{
+					Date:        time.Date(2025, 2, 24, 0, 0, 0, 0, time.UTC),
+					Amount:      decimal.NewFromFloat(-1000.000),
+					Description: "56130086210",
+					Reference:   "5490990004",
+					Source:      "SEB",
+					RawData: map[string]any{
+						"ValueDate": "2025-02-22",
+						"Balance":   "2814.160",
+					},
+				},
+			},
+		},
 	}
 
 	// TODO: Replace context.TODO() with proper context handling for timeouts and cancellation

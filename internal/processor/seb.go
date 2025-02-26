@@ -65,6 +65,8 @@ func (p *SEBProcessor) ProcessDocument(ctx context.Context, reader io.Reader) ([
 		return nil, err
 	}
 
+	p.logger.Info("header validated successfully", "header", header)
+
 	var transactions []Transaction
 	lineNum := 1 // Start after header
 
@@ -81,10 +83,11 @@ func (p *SEBProcessor) ProcessDocument(ctx context.Context, reader io.Reader) ([
 			}
 		}
 
+		p.logger.Debug("processing record", "line", lineNum, "record", record)
 		trans, err := p.parseTransaction(record, lineNum)
 		if err != nil {
 			// Log the error but continue processing other records
-			p.logger.Warn("failed to parse transaction",
+			p.logger.Error("failed to parse transaction",
 				"line", lineNum,
 				"error", err,
 				"raw_data", record)
@@ -92,17 +95,25 @@ func (p *SEBProcessor) ProcessDocument(ctx context.Context, reader io.Reader) ([
 			continue
 		}
 
+		p.logger.Debug("successfully parsed transaction",
+			"line", lineNum,
+			"date", trans.Date,
+			"amount", trans.Amount,
+			"description", trans.Description)
 		transactions = append(transactions, trans)
 		lineNum++
 	}
 
 	if len(transactions) == 0 {
+		p.logger.Warn("no transactions were found in the document")
 		return nil, &ProcessingError{
 			Operation: "process_document",
 			Err:       fmt.Errorf("no valid transactions found in document"),
 		}
 	}
 
+	p.logger.Info("successfully processed document",
+		"total_transactions", len(transactions))
 	return transactions, nil
 }
 
@@ -121,6 +132,11 @@ func (p *SEBProcessor) validateHeader(header []string) error {
 			Operation: "validate_header",
 			Err:       fmt.Errorf("invalid number of columns: got %d, want %d", len(header), len(expectedHeaders)),
 		}
+	}
+
+	// Remove BOM from the first header if present
+	if len(header[0]) > 0 && strings.HasPrefix(header[0], "\uFEFF") {
+		header[0] = strings.TrimPrefix(header[0], "\uFEFF")
 	}
 
 	for i, expected := range expectedHeaders {
@@ -145,22 +161,25 @@ func (p *SEBProcessor) parseTransaction(record []string, lineNum int) (Transacti
 	}
 
 	// Parse booking date
-	bookingDate, err := time.Parse("2006-01-02", record[p.format.BookingDate])
+	dateStr := record[p.format.BookingDate]
+	p.logger.Debug("parsing date", "raw_date", dateStr)
+	bookingDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
 		return Transaction{}, &ProcessingError{
 			Operation: "parse_date",
-			Err:       err,
+			Err:       fmt.Errorf("invalid date format '%s': %v", dateStr, err),
 			Line:      lineNum,
 		}
 	}
 
 	// Parse amount (replace comma with dot for decimal parsing)
 	amountStr := strings.Replace(record[p.format.Amount], ",", ".", 1)
+	p.logger.Debug("parsing amount", "raw_amount", amountStr)
 	amount, err := decimal.NewFromString(amountStr)
 	if err != nil {
 		return Transaction{}, &ProcessingError{
 			Operation: "parse_amount",
-			Err:       err,
+			Err:       fmt.Errorf("invalid amount format '%s': %v", amountStr, err),
 			Line:      lineNum,
 		}
 	}

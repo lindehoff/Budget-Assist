@@ -23,6 +23,9 @@ type Store interface {
 	GetPromptByType(ctx context.Context, promptType string) (*Prompt, error)
 	UpdatePrompt(ctx context.Context, prompt *Prompt) error
 	ListPrompts(ctx context.Context) ([]Prompt, error)
+
+	// Transaction-related methods
+	StoreTransaction(ctx context.Context, tx *Transaction) error
 }
 
 // SQLStore implements Store interface using GORM
@@ -201,4 +204,12 @@ func (s *SQLStore) ListPrompts(ctx context.Context) ([]Prompt, error) {
 		return nil, fmt.Errorf("failed to list prompts: %w", result.Error)
 	}
 	return prompts, nil
+}
+
+// StoreTransaction stores a transaction in the database
+func (s *SQLStore) StoreTransaction(ctx context.Context, tx *Transaction) error {
+	if err := s.db.WithContext(ctx).Create(tx).Error; err != nil {
+		return fmt.Errorf("failed to store transaction: %w", err)
+	}
+	return nil
 }

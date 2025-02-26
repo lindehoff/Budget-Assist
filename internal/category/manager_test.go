@@ -118,6 +118,10 @@ func (m *mockStore) ListPrompts(ctx context.Context) ([]db.Prompt, error) {
 	return nil, nil
 }
 
+func (m *mockStore) StoreTransaction(ctx context.Context, tx *db.Transaction) error {
+	return nil
+}
+
 type mockAIService struct{}
 
 func (m *mockAIService) AnalyzeTransaction(ctx context.Context, _ *db.Transaction) (*ai.Analysis, error) {
