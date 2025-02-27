@@ -19,6 +19,12 @@ type TransactionFilter struct {
 
 // Store defines the interface for database operations
 type Store interface {
+	// Category type operations
+	CreateCategoryType(ctx context.Context, categoryType *CategoryType) error
+	UpdateCategoryType(ctx context.Context, categoryType *CategoryType) error
+	GetCategoryTypeByID(ctx context.Context, id uint) (*CategoryType, error)
+	ListCategoryTypes(ctx context.Context) ([]CategoryType, error)
+
 	// Category operations
 	CreateCategory(ctx context.Context, category *Category) error
 	UpdateCategory(ctx context.Context, category *Category) error
@@ -77,6 +83,47 @@ func NewStore(db *gorm.DB, logger *slog.Logger) Store {
 		db:     db,
 		logger: logger,
 	}
+}
+
+// CreateCategoryType creates a new category type in the database
+func (s *SQLStore) CreateCategoryType(ctx context.Context, categoryType *CategoryType) error {
+	result := s.db.WithContext(ctx).Create(categoryType)
+	if result.Error != nil {
+		return fmt.Errorf("failed to create category type: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdateCategoryType updates an existing category type
+func (s *SQLStore) UpdateCategoryType(ctx context.Context, categoryType *CategoryType) error {
+	result := s.db.WithContext(ctx).Save(categoryType)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update category type: %w", result.Error)
+	}
+	return nil
+}
+
+// GetCategoryTypeByID retrieves a category type by its ID
+func (s *SQLStore) GetCategoryTypeByID(ctx context.Context, id uint) (*CategoryType, error) {
+	var categoryType CategoryType
+	result := s.db.WithContext(ctx).First(&categoryType, id)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get category type: %w", result.Error)
+	}
+	return &categoryType, nil
+}
+
+// ListCategoryTypes returns all category types
+func (s *SQLStore) ListCategoryTypes(ctx context.Context) ([]CategoryType, error) {
+	var categoryTypes []CategoryType
+	result := s.db.WithContext(ctx).Find(&categoryTypes)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list category types: %w", result.Error)
+	}
+	return categoryTypes, nil
 }
 
 // CreateCategory creates a new category in the database

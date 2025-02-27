@@ -51,8 +51,22 @@ var configViewCmd = &cobra.Command{
 			return nil
 		}
 
-		for k, v := range settings {
-			fmt.Printf("%s: %v\n", k, v)
+		// Print each section in a structured way
+		for section, values := range settings {
+			fmt.Printf("\n[%s]\n", section)
+			if valuesMap, ok := values.(map[string]interface{}); ok {
+				for key, value := range valuesMap {
+					// Mask sensitive data
+					if section == "ai" && key == "api_key" {
+						if str, ok := value.(string); ok && len(str) > 8 {
+							value = str[:8] + "..." + str[len(str)-4:]
+						}
+					}
+					fmt.Printf("  %s: %v\n", key, value)
+				}
+			} else {
+				fmt.Printf("  %v\n", values)
+			}
 		}
 		return nil
 	},
@@ -67,8 +81,13 @@ var configInitCmd = &cobra.Command{
 		// Set default values
 		viper.SetDefault("database.type", "sqlite")
 		viper.SetDefault("database.path", filepath.Join(userHomeDir, ".budgetassist.db"))
-		viper.SetDefault("import.default_currency", "USD")
+		viper.SetDefault("database.import_default_categories", true)
+		viper.SetDefault("database.import_default_prompts", true)
+		viper.SetDefault("import.default_currency", "SEK")
 		viper.SetDefault("export.format", "csv")
+		viper.SetDefault("ai.enabled", true)
+		viper.SetDefault("ai.timeout", "10s")
+		viper.SetDefault("ai.model", "gpt-4-turbo")
 
 		configPath := filepath.Join(userHomeDir, ".budgetassist.yaml")
 		if err := viper.SafeWriteConfigAs(configPath); err != nil {

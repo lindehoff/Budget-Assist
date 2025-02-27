@@ -166,13 +166,13 @@ func TestCreateCategory(t *testing.T) {
 				t.Fatalf("CreateCategory(%+v) returned nil category when no error expected", tt.req)
 			}
 
-			if category.Name != tt.req.Name {
+			if category.GetName(db.LangEN) != tt.req.Name {
 				t.Errorf("CreateCategory(%+v) category name:\ngot:  %v\nwant: %v",
-					tt.req, category.Name, tt.req.Name)
+					tt.req, category.GetName(db.LangEN), tt.req.Name)
 			}
-			if category.Description != tt.req.Description {
+			if category.GetDescription(db.LangEN) != tt.req.Description {
 				t.Errorf("CreateCategory(%+v) category description:\ngot:  %v\nwant: %v",
-					tt.req, category.Description, tt.req.Description)
+					tt.req, category.GetDescription(db.LangEN), tt.req.Description)
 			}
 			if category.TypeID != tt.req.TypeID {
 				t.Errorf("CreateCategory(%+v) category typeID:\ngot:  %v\nwant: %v",
@@ -262,13 +262,13 @@ func TestUpdateCategory(t *testing.T) {
 				return
 			}
 
-			if tt.req.Name != "" && category.Name != tt.req.Name {
+			if tt.req.Name != "" && category.GetName(db.LangEN) != tt.req.Name {
 				t.Errorf("UpdateCategory(id=%d, %+v) category name:\ngot:  %v\nwant: %v",
-					tt.id, tt.req, category.Name, tt.req.Name)
+					tt.id, tt.req, category.GetName(db.LangEN), tt.req.Name)
 			}
-			if tt.req.Description != "" && category.Description != tt.req.Description {
+			if tt.req.Description != "" && category.GetDescription(db.LangEN) != tt.req.Description {
 				t.Errorf("UpdateCategory(id=%d, %+v) category description:\ngot:  %v\nwant: %v",
-					tt.id, tt.req, category.Description, tt.req.Description)
+					tt.id, tt.req, category.GetDescription(db.LangEN), tt.req.Description)
 			}
 			if tt.req.IsActive != nil && category.IsActive != *tt.req.IsActive {
 				t.Errorf("UpdateCategory(id=%d, %+v) category isActive:\ngot:  %v\nwant: %v",
@@ -713,8 +713,8 @@ func TestConcurrent_category_operations(t *testing.T) {
 		}
 
 		expectedName := fmt.Sprintf("Updated Category %d", i)
-		if category.Name != expectedName {
-			t.Errorf("Category %d name = %q, want %q", i, category.Name, expectedName)
+		if category.GetName(db.LangEN) != expectedName {
+			t.Errorf("Category %d name = %q, want %q", i, category.GetName(db.LangEN), expectedName)
 		}
 	}
 }

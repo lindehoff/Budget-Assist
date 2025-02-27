@@ -209,3 +209,18 @@ func (m *MockStore) GetPromptByTypeAndVersion(ctx context.Context, promptType, v
 	}
 	return prompt, nil
 }
+
+// CreateCategoryType implements db.Store
+func (m *MockStore) CreateCategoryType(ctx context.Context, categoryType *db.CategoryType) error {
+	return nil
+}
+
+// UpdateCategoryType implements db.Store
+func (m *MockStore) UpdateCategoryType(ctx context.Context, categoryType *db.CategoryType) error {
+	return nil
+}
+
+// ListCategoryTypes implements db.Store
+func (m *MockStore) ListCategoryTypes(ctx context.Context) ([]db.CategoryType, error) {
+	return nil, nil
+}

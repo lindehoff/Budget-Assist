@@ -107,8 +107,6 @@ func (c *Category) GetDescription(langCode string) string {
 // Subcategory represents a subcategory that can be linked to multiple categories
 type Subcategory struct {
 	gorm.Model
-	Name               string
-	Description        string
 	CategoryTypeID     uint
 	InstanceIdentifier string
 	IsActive           bool `gorm:"default:true"`
@@ -246,14 +244,13 @@ const (
 // Prompt represents an AI prompt template
 type Prompt struct {
 	gorm.Model
-	Type         string    `gorm:"not null;size:50"`
-	Name         string    `gorm:"not null;size:100"`
-	SystemPrompt string    `gorm:"not null;type:text"`
-	UserPrompt   string    `gorm:"not null;type:text"`
-	Examples     string    `gorm:"type:text"` // JSON string of examples
-	Rules        string    `gorm:"type:text"` // JSON string of rules
-	Version      string    `gorm:"not null;size:20"`
-	IsActive     bool      `gorm:"not null"`
-	CreatedAt    time.Time `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
+	Type         string `gorm:"not null;size:50"`
+	Name         string `gorm:"not null;size:100"`
+	Description  string `gorm:"size:500"`
+	SystemPrompt string `gorm:"not null;type:text"`
+	UserPrompt   string `gorm:"not null;type:text"`
+	Examples     string `gorm:"type:text"` // JSON string of examples
+	Rules        string `gorm:"type:text"` // JSON string of rules
+	Version      string `gorm:"not null;size:20"`
+	IsActive     bool   `gorm:"not null"`
 }

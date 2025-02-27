@@ -14,10 +14,10 @@ import (
 
 // getStore returns a new database store instance
 func getStore() (db.Store, error) {
-	// TODO: Get configuration from viper
-	dbPath := os.ExpandEnv("${HOME}/.budgetassist.db")
 	config := &db.Config{
-		DBPath: dbPath,
+		DBPath:                  viper.GetString("database.path"),
+		ImportDefaultCategories: viper.GetBool("database.import_default_categories"),
+		ImportDefaultPrompts:    viper.GetBool("database.import_default_prompts"),
 	}
 
 	gormDB, err := db.Initialize(config)

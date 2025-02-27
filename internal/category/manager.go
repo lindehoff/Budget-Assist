@@ -54,6 +54,7 @@ type CreateSubcategoryRequest struct {
 	InstanceIdentifier string
 	Translations       map[string]TranslationData
 	Categories         []uint // List of category IDs to link
+	IsSystem           bool   // Whether this is a system subcategory
 }
 
 // TranslationData represents translation information
@@ -398,6 +399,30 @@ func (m *Manager) createTranslations(ctx context.Context, categoryID uint, trans
 		}
 		if err := m.store.CreateTranslation(ctx, translation); err != nil {
 			return fmt.Errorf("failed to create translation for language %s: %w", langCode, err)
+		}
+	}
+	return nil
+}
+
+// CreateTranslation creates a new translation for an entity
+func (m *Manager) CreateTranslation(ctx context.Context, translation *db.Translation) error {
+	if err := m.store.CreateTranslation(ctx, translation); err != nil {
+		return CategoryError{
+			Operation: "create_translation",
+			Category:  fmt.Sprintf("%s_%d", translation.EntityType, translation.EntityID),
+			Err:       err,
+		}
+	}
+	return nil
+}
+
+// CreateCategoryType creates a new category type
+func (m *Manager) CreateCategoryType(ctx context.Context, categoryType *db.CategoryType) error {
+	if err := m.store.CreateCategoryType(ctx, categoryType); err != nil {
+		return CategoryError{
+			Operation: "create_category_type",
+			Category:  categoryType.Name,
+			Err:       err,
 		}
 	}
 	return nil
