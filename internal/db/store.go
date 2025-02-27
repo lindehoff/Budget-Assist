@@ -19,6 +19,12 @@ type TransactionFilter struct {
 
 // Store defines the interface for database operations
 type Store interface {
+	// Category type operations
+	CreateCategoryType(ctx context.Context, categoryType *CategoryType) error
+	UpdateCategoryType(ctx context.Context, categoryType *CategoryType) error
+	GetCategoryTypeByID(ctx context.Context, id uint) (*CategoryType, error)
+	ListCategoryTypes(ctx context.Context) ([]CategoryType, error)
+
 	// Category operations
 	CreateCategory(ctx context.Context, category *Category) error
 	UpdateCategory(ctx context.Context, category *Category) error
@@ -79,6 +85,47 @@ func NewStore(db *gorm.DB, logger *slog.Logger) Store {
 	}
 }
 
+// CreateCategoryType creates a new category type in the database
+func (s *SQLStore) CreateCategoryType(ctx context.Context, categoryType *CategoryType) error {
+	result := s.db.WithContext(ctx).Create(categoryType)
+	if result.Error != nil {
+		return fmt.Errorf("failed to create category type: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdateCategoryType updates an existing category type
+func (s *SQLStore) UpdateCategoryType(ctx context.Context, categoryType *CategoryType) error {
+	result := s.db.WithContext(ctx).Save(categoryType)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update category type: %w", result.Error)
+	}
+	return nil
+}
+
+// GetCategoryTypeByID retrieves a category type by its ID
+func (s *SQLStore) GetCategoryTypeByID(ctx context.Context, id uint) (*CategoryType, error) {
+	var categoryType CategoryType
+	result := s.db.WithContext(ctx).First(&categoryType, id)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get category type: %w", result.Error)
+	}
+	return &categoryType, nil
+}
+
+// ListCategoryTypes returns all category types
+func (s *SQLStore) ListCategoryTypes(ctx context.Context) ([]CategoryType, error) {
+	var categoryTypes []CategoryType
+	result := s.db.WithContext(ctx).Find(&categoryTypes)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list category types: %w", result.Error)
+	}
+	return categoryTypes, nil
+}
+
 // CreateCategory creates a new category in the database
 func (s *SQLStore) CreateCategory(ctx context.Context, category *Category) error {
 	result := s.db.WithContext(ctx).Create(category)
@@ -100,12 +147,17 @@ func (s *SQLStore) UpdateCategory(ctx context.Context, category *Category) error
 // GetCategoryByID retrieves a category by its ID
 func (s *SQLStore) GetCategoryByID(ctx context.Context, id uint) (*Category, error) {
 	var category Category
-	result := s.db.WithContext(ctx).First(&category, id)
+	result := s.db.WithContext(ctx).Preload("Translations").First(&category, id)
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get category: %w", result.Error)
+	}
+	if s.logger != nil {
+		s.logger.Debug("retrieved category with translations",
+			"category_id", category.ID,
+			"translations_count", len(category.Translations))
 	}
 	return &category, nil
 }
@@ -113,13 +165,22 @@ func (s *SQLStore) GetCategoryByID(ctx context.Context, id uint) (*Category, err
 // ListCategories returns all categories, optionally filtered by type
 func (s *SQLStore) ListCategories(ctx context.Context, typeID *uint) ([]Category, error) {
 	var categories []Category
-	query := s.db.WithContext(ctx)
+	query := s.db.WithContext(ctx).
+		Preload("Translations").
+		Preload("Subcategories").
+		Preload("Subcategories.Subcategory").
+		Preload("Subcategories.Subcategory.Translations")
 	if typeID != nil {
 		query = query.Where("type_id = ?", *typeID)
 	}
 	result := query.Find(&categories)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to list categories: %w", result.Error)
+	}
+	if s.logger != nil && len(categories) > 0 {
+		s.logger.Debug("retrieved categories with translations",
+			"categories_count", len(categories),
+			"first_category_translations", len(categories[0].Translations))
 	}
 	return categories, nil
 }
@@ -421,7 +482,26 @@ func (s *SQLStore) Close() error {
 
 // GetTranslations retrieves translations for a given entity
 func (s *SQLStore) GetTranslations(ctx context.Context, entityID uint, entityType string) ([]Translation, error) {
+	// First check if the entity exists
+	switch entityType {
+	case "category":
+		var category Category
+		if err := s.db.First(&category, entityID).Error; err != nil {
+			return nil, err
+		}
+	case "subcategory":
+		var subcategory Subcategory
+		if err := s.db.First(&subcategory, entityID).Error; err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported entity type: %s", entityType)
+	}
+
 	var translations []Translation
-	result := s.db.WithContext(ctx).Where("entity_id = ? AND entity_type = ?", entityID, entityType).Find(&translations)
-	return translations, result.Error
+	if err := s.db.Where("entity_id = ? AND entity_type = ?", entityID, entityType).Find(&translations).Error; err != nil {
+		return nil, err
+	}
+
+	return translations, nil
 }

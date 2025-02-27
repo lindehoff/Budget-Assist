@@ -11,6 +11,7 @@ func runMigrations(db *gorm.DB) error {
 		&CategoryType{},
 		&Category{},
 		&Subcategory{},
+		&CategorySubcategory{},
 		&Transaction{},
 		&Tag{},
 		&Budget{},

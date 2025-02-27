@@ -59,31 +59,41 @@ func (ct *CategoryType) GetTranslation(langCode string) string {
 // Category represents a main category
 type Category struct {
 	gorm.Model
-	Name               string
-	Description        string
-	TypeID             uint `gorm:"not null"`
+	Name               string `gorm:"not null;size:100"`
+	Description        string `gorm:"size:500"`
+	TypeID             uint   `gorm:"not null"`
 	InstanceIdentifier string
 	IsActive           bool `gorm:"default:true"`
 	Subcategories      []CategorySubcategory
-	Translations       []Translation `gorm:"polymorphic:Entity"`
+	Translations       []Translation `gorm:"polymorphic:Entity;polymorphicValue:category"`
 }
 
 // BeforeCreate validates the category before creation
 func (c *Category) BeforeCreate(tx *gorm.DB) error {
 	if c.Name == "" && len(c.Translations) == 0 {
-		return fmt.Errorf("category name is required")
+		return fmt.Errorf("either name or at least one translation is required")
+	}
+	if c.TypeID == 0 {
+		return fmt.Errorf("type ID is required")
 	}
 	return nil
 }
 
 // GetName returns the translated name for the given language code
 func (c *Category) GetName(langCode string) string {
+	if langCode == LangEN && c.Name != "" {
+		return c.Name
+	}
 	for _, t := range c.Translations {
 		if t.LanguageCode == langCode {
 			return t.Name
 		}
 	}
-	// Return first available translation if requested language not found
+	// Return English name as fallback
+	if c.Name != "" {
+		return c.Name
+	}
+	// Return first available translation if no English name
 	if len(c.Translations) > 0 {
 		return c.Translations[0].Name
 	}
@@ -92,12 +102,19 @@ func (c *Category) GetName(langCode string) string {
 
 // GetDescription returns the translated description for the given language code
 func (c *Category) GetDescription(langCode string) string {
+	if langCode == LangEN && c.Description != "" {
+		return c.Description
+	}
 	for _, t := range c.Translations {
 		if t.LanguageCode == langCode {
 			return t.Description
 		}
 	}
-	// Return first available translation if requested language not found
+	// Return English description as fallback
+	if c.Description != "" {
+		return c.Description
+	}
+	// Return first available translation if no English description
 	if len(c.Translations) > 0 {
 		return c.Translations[0].Description
 	}
@@ -107,8 +124,8 @@ func (c *Category) GetDescription(langCode string) string {
 // Subcategory represents a subcategory that can be linked to multiple categories
 type Subcategory struct {
 	gorm.Model
-	Name               string
-	Description        string
+	Name               string `gorm:"not null;size:100"`
+	Description        string `gorm:"size:500"`
 	CategoryTypeID     uint
 	InstanceIdentifier string
 	IsActive           bool `gorm:"default:true"`
@@ -119,12 +136,19 @@ type Subcategory struct {
 
 // GetName returns the translated name for the given language code
 func (s *Subcategory) GetName(langCode string) string {
+	if langCode == LangEN && s.Name != "" {
+		return s.Name
+	}
 	for _, t := range s.Translations {
 		if t.LanguageCode == langCode {
 			return t.Name
 		}
 	}
-	// Return first available translation if requested language not found
+	// Return English name as fallback
+	if s.Name != "" {
+		return s.Name
+	}
+	// Return first available translation if no English name
 	if len(s.Translations) > 0 {
 		return s.Translations[0].Name
 	}
@@ -133,16 +157,31 @@ func (s *Subcategory) GetName(langCode string) string {
 
 // GetDescription returns the translated description for the given language code
 func (s *Subcategory) GetDescription(langCode string) string {
+	if langCode == LangEN && s.Description != "" {
+		return s.Description
+	}
 	for _, t := range s.Translations {
 		if t.LanguageCode == langCode {
 			return t.Description
 		}
 	}
-	// Return first available translation if requested language not found
+	// Return English description as fallback
+	if s.Description != "" {
+		return s.Description
+	}
+	// Return first available translation if no English description
 	if len(s.Translations) > 0 {
 		return s.Translations[0].Description
 	}
 	return ""
+}
+
+// BeforeCreate validates the subcategory before creation
+func (s *Subcategory) BeforeCreate(tx *gorm.DB) error {
+	if s.Name == "" && len(s.Translations) == 0 {
+		return fmt.Errorf("either name or at least one translation is required")
+	}
+	return nil
 }
 
 // CategorySubcategory represents the many-to-many relationship between categories and subcategories
@@ -246,14 +285,13 @@ const (
 // Prompt represents an AI prompt template
 type Prompt struct {
 	gorm.Model
-	Type         string    `gorm:"not null;size:50"`
-	Name         string    `gorm:"not null;size:100"`
-	SystemPrompt string    `gorm:"not null;type:text"`
-	UserPrompt   string    `gorm:"not null;type:text"`
-	Examples     string    `gorm:"type:text"` // JSON string of examples
-	Rules        string    `gorm:"type:text"` // JSON string of rules
-	Version      string    `gorm:"not null;size:20"`
-	IsActive     bool      `gorm:"not null"`
-	CreatedAt    time.Time `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
+	Type         string `gorm:"not null;size:50"`
+	Name         string `gorm:"not null;size:100"`
+	Description  string `gorm:"size:500"`
+	SystemPrompt string `gorm:"not null;type:text"`
+	UserPrompt   string `gorm:"not null;type:text"`
+	Examples     string `gorm:"type:text"` // JSON string of examples
+	Rules        string `gorm:"type:text"` // JSON string of rules
+	Version      string `gorm:"not null;size:20"`
+	IsActive     bool   `gorm:"not null"`
 }

@@ -17,8 +17,9 @@ import (
 // Config holds database configuration
 type Config struct {
 	DBPath string
-	// Add a flag to control seeding
-	SeedPredefined bool
+	// Add flags to control importing of default data
+	ImportDefaultCategories bool
+	ImportDefaultPrompts    bool
 }
 
 // Initialize sets up the database connection and runs migrations
@@ -59,12 +60,20 @@ func Initialize(cfg *Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	// Seed predefined data if requested
-	if cfg.SeedPredefined {
-		// Use global logger context
-		ctx := WithLogger(context.Background(), slog.Default())
-		if err := SeedPredefinedCategories(ctx, db); err != nil {
-			return nil, fmt.Errorf("failed to seed predefined categories: %w", err)
+	// Use global logger context
+	ctx := WithLogger(context.Background(), slog.Default())
+
+	// Import default categories if requested
+	if cfg.ImportDefaultCategories {
+		if err := ImportDefaultCategories(ctx, db); err != nil {
+			return nil, fmt.Errorf("failed to import default categories: %w", err)
+		}
+	}
+
+	// Import default prompts if requested
+	if cfg.ImportDefaultPrompts {
+		if err := ImportDefaultPrompts(ctx, db); err != nil {
+			return nil, fmt.Errorf("failed to import default prompts: %w", err)
 		}
 	}
 
