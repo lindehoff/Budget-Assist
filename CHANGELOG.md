@@ -1,5 +1,107 @@
 # Budget-Assist Changelog
 
+## 2.8.0 (2025-02-27)
+
+* Merge pull request #23 from lindehoff/feat/refactor-category-management ([](https://github.com/lindehoff/Budget-Assist/commit/3a8bcf7e28c0b24b16e1ed6882ebcc42204373f9))
+  Feat/refactor category management
+* **category:** enhance category management features 🛠️ ([](https://github.com/lindehoff/Budget-Assist/commit/8ccf4aa26152683bc94602d71a2b32a48b0967e4))
+  - Added output format constants for JSON and table display options. 📊
+- Introduced status symbols for active and inactive categories. ✅❌
+- Refactored output functions to use constants for format handling. 🔄
+- Updated category list command to use constants for default output format. ⚙️
+- Created a new function `formatActive` to standardize active status representation. 🔧
+
+fix(store): improve category creation validation 🔍
+
+- Modified category creation logic to require either a name or at least one translation. 📝
+- Enhanced translation handling in `CreateTranslation` method to update or add translations. 🌍
+
+feat(manager): streamline category creation and update processes ✨
+
+- Added default English translation if not provided during category creation. 🇬🇧
+- Simplified update logic for category fields and translations. 🔄
+- Ensured that updates to categories also reflect in default English translations. 🔄
+
+test(manager): add comprehensive tests for category management 🧪
+
+- Implemented tests for creating and updating categories with various scenarios. ✅
+- Verified that translations are correctly handled during category operations. 🌐
+* **category:** enhance error messages with context 🛠️ ([](https://github.com/lindehoff/Budget-Assist/commit/30e04bfdaa394de50b15a342d7b7714e9e8fb429))
+  - Added context package import to category.go for improved error handling. 📦
+- Updated error message formatting to include resource details for better clarity. ✨
+- Enhanced error handling in list and add commands to provide more informative feedback. 📋
+- Introduced subcategory add command with support for translations and categories. 🌍
+
+feat(config): modify default values for database settings ⚙️
+
+- Changed default currency to SEK for consistency in financial operations. 💰
+- Added default categories and prompts for streamlined database import. 📥
+- Enabled AI features with default timeout and model settings for improved performance. 🤖
+
+chore(cmd/utils): refactor getStore function 🔧
+
+- Updated getStore function to utilize viper for database configuration management. 🔄
+
+feat: update categoryTypes in categories.json 📂
+
+- Added new category types: Income, Property, Vehicle, Fixed Costs, and Variable Costs. 🏠
+- Updated translations for category names and descriptions for better localization. 🌐
+- Included subcategories under Housing category with updated translations. 🏡
+
+feat(ai): implement category type operations in MockStore 🧪
+
+- Added CreateCategoryType, UpdateCategoryType, and ListCategoryTypes functions for testing. ✅
+
+feat(category): introduce methods for translation and category type creation 📖
+
+- Added CreateTranslation method for creating new translations for entities. 🆕
+- Added CreateCategoryType method for creating new category types. 🆕
+
+chore: update category manager_test.go 📝
+
+- Refactored tests to use language-specific getters for name and description. 🔍
+
+feat(db): add flags for importing default data 🚩
+
+- Introduced flags to control the importing of default data in the database configuration struct. ⚡
+- Updated initialization function to import default categories and prompts if requested. 📊
+
+feat(db): implement test cases for entity creation and retrieval 🧪
+
+- Added test cases for creating various entity types with translations and transactions. 🔄
+- Included tests for creating category types, categories, subcategories, and verifying translations. ✔️
+
+feat(db): add functions for importing default categories and prompts 📥
+
+- Implemented functions to import default categories and prompts from JSON files. 📄
+- Developed ImportDefaultCategories and ImportDefaultPrompts functions for future use. 🔮
+
+feat: update Subcategory and Prompt models 🆕
+
+- Removed Name and Description fields from Subcategory model for simplification. ✂️
+- Added Description field to Prompt model with size constraint for better data integrity. 📏
+- Removed CreatedAt and UpdatedAt fields from Prompt model to streamline the structure. 🗑️
+
+feat(db): remove predefined category and subcategory data ❌
+
+- Eliminated predefined category and subcategory data from seed.go in internal/db directory. 🗃️
+
+feat(db): add tests for seeding predefined categories 🧪
+
+- Added tests to ensure successful seeding of predefined categories. 🌱
+- Implemented tests to handle errors for invalid category types and subcategories. ⚠️
+- Verified idempotent operation of seeding to ensure consistency. 🔄
+
+feat(db): add category type operations to SQLStore 🏗️
+
+- Implemented CreateCategoryType, UpdateCategoryType, GetCategoryTypeByID, and ListCategoryTypes methods in SQLStore. 🛠️
+- These methods facilitate CRUD operations for category types in the database. 📊
+
+feat(db): enhance translations for categories and category types 🌍
+
+- Added translations for category and category type in createTestCategory and createTestCategoryType functions. 📖
+- Updated test cases in TestSQLStore_CreateCategory, TestSQLStore_ListCategories, and TestSQLStore_CreateTranslation to reflect recent changes. 🔄
+
 ## <small>2.7.1 (2025-02-27)</small>
 
 * **deps:** remove unused test dependencies from go.mod ([](https://github.com/lindehoff/Budget-Assist/commit/daca48e5f35c256783e94e758e7ec8624aafe065))
