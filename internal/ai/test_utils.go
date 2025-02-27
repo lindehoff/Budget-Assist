@@ -2,74 +2,97 @@ package ai
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	db "github.com/lindehoff/Budget-Assist/internal/db"
 )
 
+// MockStore implements a mock database store for testing
 type MockStore struct {
-	prompts    map[string]*db.Prompt
-	categories map[uint]*db.Category
-	nextID     uint
-	mu         sync.Mutex
-	Categories []*db.Category
+	categories    []db.Category
+	subcategories []db.Subcategory
+	prompts       map[string]*db.Prompt
+	err           error
+	nextID        uint
+	mu            sync.Mutex
+	Categories    []*db.Category
 }
 
 func NewMockStore() *MockStore {
 	return &MockStore{
-		prompts:    make(map[string]*db.Prompt),
-		categories: make(map[uint]*db.Category),
-		nextID:     1,
+		categories:    make([]db.Category, 0),
+		subcategories: make([]db.Subcategory, 0),
+		prompts:       make(map[string]*db.Prompt),
+		nextID:        1,
 	}
 }
 
 func (m *MockStore) CreateCategory(ctx context.Context, category *db.Category) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if category.Name == "" && len(category.Translations) == 0 {
-		return db.DatabaseOperationError{
-			Operation: "create",
-			Entity:    "category",
-			Err:       fmt.Errorf("either name or at least one translation is required"),
-		}
+
+	if m.err != nil {
+		return m.err
 	}
+
 	category.ID = m.nextID
 	m.nextID++
-	m.categories[category.ID] = category
+	m.categories = append(m.categories, *category)
 	return nil
 }
 
 func (m *MockStore) UpdateCategory(ctx context.Context, category *db.Category) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.categories[category.ID]; !exists {
-		return db.ErrNotFound
+
+	if m.err != nil {
+		return m.err
 	}
-	m.categories[category.ID] = category
-	return nil
+
+	for i := range m.categories {
+		if m.categories[i].ID == category.ID {
+			m.categories[i] = *category
+			return nil
+		}
+	}
+	return db.ErrNotFound
 }
 
 func (m *MockStore) GetCategoryByID(ctx context.Context, id uint) (*db.Category, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	category, exists := m.categories[id]
-	if !exists {
-		return nil, db.ErrNotFound
+
+	if m.err != nil {
+		return nil, m.err
 	}
-	return category, nil
+
+	for i := range m.categories {
+		if m.categories[i].ID == id {
+			return &m.categories[i], nil
+		}
+	}
+	return nil, db.ErrNotFound
 }
 
 func (m *MockStore) ListCategories(ctx context.Context, typeID *uint) ([]db.Category, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var categories []db.Category
-	for _, category := range m.categories {
-		if typeID == nil || category.TypeID == *typeID {
-			categories = append(categories, *category)
+
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	if typeID == nil {
+		return m.categories, nil
+	}
+
+	var filtered []db.Category
+	for _, cat := range m.categories {
+		if cat.TypeID == *typeID {
+			filtered = append(filtered, cat)
 		}
 	}
-	return categories, nil
+	return filtered, nil
 }
 
 func (m *MockStore) GetCategoryTypeByID(ctx context.Context, id uint) (*db.CategoryType, error) {
@@ -81,10 +104,18 @@ func (m *MockStore) CreateTranslation(ctx context.Context, translation *db.Trans
 	defer m.mu.Unlock()
 
 	if translation.EntityType == string(db.EntityTypeCategory) {
-		category, exists := m.categories[translation.EntityID]
-		if !exists {
+		// Find the category in the slice
+		var category *db.Category
+		for i := range m.categories {
+			if m.categories[i].ID == translation.EntityID {
+				category = &m.categories[i]
+				break
+			}
+		}
+		if category == nil {
 			return db.ErrNotFound
 		}
+
 		// Update or add translation
 		found := false
 		for i, t := range category.Translations {
@@ -97,7 +128,6 @@ func (m *MockStore) CreateTranslation(ctx context.Context, translation *db.Trans
 		if !found {
 			category.Translations = append(category.Translations, *translation)
 		}
-		m.categories[translation.EntityID] = category
 	}
 	return nil
 }
@@ -143,6 +173,16 @@ func (m *MockStore) Close() error {
 }
 
 func (m *MockStore) CreateSubcategory(ctx context.Context, subcategory *db.Subcategory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.err != nil {
+		return m.err
+	}
+
+	subcategory.ID = m.nextID
+	m.nextID++
+	m.subcategories = append(m.subcategories, *subcategory)
 	return nil
 }
 
@@ -151,11 +191,30 @@ func (m *MockStore) UpdateSubcategory(ctx context.Context, subcategory *db.Subca
 }
 
 func (m *MockStore) GetSubcategoryByID(ctx context.Context, id uint) (*db.Subcategory, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	for i := range m.subcategories {
+		if m.subcategories[i].ID == id {
+			return &m.subcategories[i], nil
+		}
+	}
+	return nil, db.ErrNotFound
 }
 
 func (m *MockStore) ListSubcategories(ctx context.Context) ([]db.Subcategory, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	return m.subcategories, nil
 }
 
 func (m *MockStore) DeleteSubcategory(ctx context.Context, id uint) error {
@@ -245,4 +304,22 @@ func (m *MockStore) UpdateCategoryType(ctx context.Context, categoryType *db.Cat
 // ListCategoryTypes implements db.Store
 func (m *MockStore) ListCategoryTypes(ctx context.Context) ([]db.CategoryType, error) {
 	return nil, nil
+}
+
+// FindSubcategoriesByTag implements db.Store
+func (m *MockStore) FindSubcategoriesByTag(ctx context.Context, tag string) ([]db.Subcategory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	var matchingSubcategories []db.Subcategory
+	for _, sub := range m.subcategories {
+		if sub.HasTag(tag) {
+			matchingSubcategories = append(matchingSubcategories, sub)
+		}
+	}
+	return matchingSubcategories, nil
 }

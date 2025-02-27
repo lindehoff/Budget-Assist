@@ -56,167 +56,445 @@
       }
     }
   ],
-  "categories": [
+  "subcategories": [
     {
-      "name": "Income",
-      "description": "All types of income",
-      "typeId": 1,
+      "name": "Salary",
+      "description": "Regular employment income",
+      "tags": ["income", "inkomst"],
       "translations": {
         "sv": {
-          "name": "Inkomster",
-          "description": "Alla typer av inkomster"
+          "name": "Lön",
+          "description": "Regelbunden arbetsinkomst"
         }
-      },
-      "subcategories": [
-        {
-          "name": "Salary",
-          "description": "Regular employment income",
-          "translations": {
-            "sv": {
-              "name": "Lön",
-              "description": "Regelbunden arbetsinkomst"
-            }
-          }
-        },
-        {
-          "name": "Sales",
-          "description": "Income from sales",
-          "translations": {
-            "sv": {
-              "name": "Försäljning",
-              "description": "Inkomster från försäljning"
-            }
-          }
-        },
-        {
-          "name": "Gift",
-          "description": "Received gifts",
-          "translations": {
-            "sv": {
-              "name": "Gåva",
-              "description": "Mottagna gåvor"
-            }
-          }
-        }
-      ]
+      }
     },
     {
-      "name": "Housing",
-      "description": "Housing related expenses",
-      "typeId": 2,
+      "name": "Sales",
+      "description": "Income from sales",
+      "tags": ["income", "inkomst"],
       "translations": {
         "sv": {
-          "name": "Bostad",
-          "description": "Boenderelaterade utgifter"
+          "name": "Försäljning",
+          "description": "Inkomster från försäljning"
+        }
+      }
+    },
+    {
+      "name": "Gift",
+      "description": "Received gifts",
+      "tags": ["income", "inkomst"],
+      "translations": {
+        "sv": {
+          "name": "Gåva",
+          "description": "Mottagna gåvor"
+        }
+      }
+    },
+    {
+      "name": "Heating",
+      "description": "Heating costs",
+      "tags": ["utilities", "hushållskostnader"],
+      "translations": {
+        "sv": {
+          "name": "Värme",
+          "description": "Värmekostnader"
+        }
+      }
+    },
+    {
+      "name": "Electricity",
+      "description": "Household electricity",
+      "tags": ["utilities", "hushållskostnader"],
+      "translations": {
+        "sv": {
+          "name": "Hushållsel",
+          "description": "Hushållsel"
+        }
+      }
+    },
+    {
+      "name": "Water and Sewage",
+      "description": "Water and sewage fees",
+      "tags": ["utilities", "hushållskostnader"],
+      "translations": {
+        "sv": {
+          "name": "Vatten och avlopp",
+          "description": "Vatten- och avloppsavgifter"
+        }
+      }
+    },
+    {
+      "name": "Waste Management",
+      "description": "Waste management fees",
+      "tags": ["utilities", "hushållskostnader"],
+      "translations": {
+        "sv": {
+          "name": "Renhållningsavgift",
+          "description": "Avgifter för sophämtning och återvinning"
+        }
+      }
+    },
+    {
+      "name": "Household Maintenance/Repairs",
+      "description": "Household maintenance and repairs",
+      "tags": ["maintenance", "underhåll", "reparationer"],
+      "translations": {
+        "sv": {
+          "name": "Husunderhållsunderhåll/reparationer",
+          "description": "Underhåll och reparationer av bostaden"
+        }
+      }
+    },
+    {
+      "name": "Other",
+      "description": "Other expenses",
+      "tags": ["miscellaneous"],
+      "translations": {
+        "sv": {
+          "name": "Övrigt",
+          "description": "Övriga utgifter"
+        }
+      }
+    },
+    {
+      "name": "Home Insurance",
+      "description": "House insurance",
+      "tags": ["insurance", "housing", "hushållskostnader", "försäkringar"],
+      "translations": {
+        "sv": {
+          "name": "Villahemförsäkring",
+          "description": "Försäkring för villan"
+        }
+      }
+    },
+    {
+      "name": "Property Tax",
+      "description": "Property tax payments",
+      "tags": ["tax", "housing", "skatt", "hushållskostnader", "fastighet"],
+      "translations": {
+        "sv": {
+          "name": "Fastighetsskatt",
+          "description": "Fastighetsskatt"
+        }
+      }
+    },
+    {
+      "name": "House Loan Interest",
+      "description": "Interest payments for house loan",
+      "tags": ["loan", "financing", "lån", "finansiering", "ränta", "interest"],
+      "translations": {
+        "sv": {
+          "name": "Huslån Ränta",
+          "description": "Räntebetalningar för huslån"
+        }
+      }
+    },
+    {
+      "name": "House Loan Amortization",
+      "description": "Principal payments for house loan",
+      "tags": ["loan", "financing", "lån", "finansiering", "amortering", "amorteringar"],
+      "translations": {
+        "sv": {
+          "name": "Huslån Amortering",
+          "description": "Amorteringar för huslån"
+        }
+      }
+    },
+    {
+      "name": "Vehicle Tax",
+      "description": "Vehicle tax payments",
+      "tags": ["tax", "vehicle", "fordon", "fordonsskatt", "skatt"],
+      "translations": {
+        "sv": {
+          "name": "Fordonsskatt",
+          "description": "Fordonsskatt"
+        }
+      }
+    },
+    {
+      "name": "Vehicle Inspection",
+      "description": "Vehicle inspection",
+      "tags": ["vehicle", "maintenance", "besiktning"],
+      "translations": {
+        "sv": {
+          "name": "Fordonsbesiktning",
+          "description": "Fordonsbesiktning"
+        }
+      }
+    },
+    {
+      "name": "Vehicle Insurance",
+      "description": "Vehicle insurance",
+      "tags": ["insurance", "vehicle", "fordon", "försäkring", "bil", "car"],
+      "translations": {
+        "sv": {
+          "name": "Fordonsförsäkring",
+          "description": "Fordonsförsäkring"
+        }
+      }
+    },
+    {
+      "name": "Tires",
+      "description": "Tire related expenses",
+      "tags": ["vehicle", "maintenance", "car", "fordon", "bil"],
+      "translations": {
+        "sv": {
+          "name": "Däck",
+          "description": "Däckrelaterade utgifter"
+        }
+      }
+    },
+    {
+      "name": "Vehicle Repairs and Service",
+      "description": "Vehicle repairs and maintenance",
+      "tags": ["maintenance", "car", "vehicle", "fordon", "bil", "underhåll", "reparationer"],
+      "translations": {
+        "sv": {
+          "name": "Fordonsreparationer och service",
+          "description": "Fordonsreparationer och underhåll"
+        }
+      }
+    },
+    {
+      "name": "Parking",
+      "description": "Parking fees",
+      "tags": ["vehicle", "bil", "car", "fordon"],
+      "translations": {
+        "sv": {
+          "name": "Parkering",
+          "description": "Parkeringsavgifter"
+        }
+      }
+    },
+    {
+      "name": "Media",
+      "description": "TV, internet, streaming services",
+      "tags": ["entertainment", "underhållning"],
+      "translations": {
+        "sv": {
+          "name": "Medier",
+          "description": "TV, internet, streamingtjänster"
+        }
+      }
+    },
+    {
+      "name": "Other Insurance",
+      "description": "Other insurance policies",
+      "tags": ["insurance", "försäkringar"],
+      "translations": {
+        "sv": {
+          "name": "Övriga försäkringar",
+          "description": "Övriga försäkringar"
+        }
+      }
+    },
+    {
+      "name": "Union and Unemployment",
+      "description": "Union fees and unemployment insurance",
+      "tags": ["insurance", "försäkringar"],
+      "translations": {
+        "sv": {
+          "name": "A-kassa och fackavgift",
+          "description": "Avgifter för a-kassa och fackförening"
+        }
+      }
+    },
+    {
+      "name": "Childcare & Support",
+      "description": "Childcare and child support payments",
+      "tags": ["family", "familj", "barn"],
+      "translations": {
+        "sv": {
+          "name": "Barnomsorg & underhållsbidrag",
+          "description": "Kostnader för barnomsorg och underhållsbidrag"
+        }
+      }
+    },
+    {
+      "name": "Student Loan Payment",
+      "description": "Student loan repayments",
+      "tags": ["loan", "education", "utbildning", "lån"],
+      "translations": {
+        "sv": {
+          "name": "Återbetalning CSN-lån",
+          "description": "Återbetalning av studielån"
+        }
+      }
+    },
+    {
+      "name": "Groceries",
+      "description": "Food and groceries",
+      "tags": ["food", "essentials", "mat", "dagligvaror"],
+      "translations": {
+        "sv": {
+          "name": "Livsmedel",
+          "description": "Mat och dagligvaror"
+        }
+      }
+    },
+    {
+      "name": "Clothes and Shoes",
+      "description": "Clothing and footwear",
+      "tags": ["personal", "essentials"],
+      "translations": {
+        "sv": {
+          "name": "Kläder och skor",
+          "description": "Kläder och skodon"
+        }
+      }
+    },
+    {
+      "name": "Leisure/Play",
+      "description": "Entertainment and recreation",
+      "tags": ["entertainment", "underhållning"],
+      "translations": {
+        "sv": {
+          "name": "Fritid/lek",
+          "description": "Underhållning och rekreation"
+        }
+      }
+    },
+    {
+      "name": "Mobile Phone",
+      "description": "Mobile phone expenses",
+      "tags": ["communication", "kommunikation"],
+      "translations": {
+        "sv": {
+          "name": "Mobiltelefon",
+          "description": "Mobiltelefonutgifter"
+        }
+      }
+    },
+    {
+      "name": "Hygiene Products",
+      "description": "Personal care items",
+      "tags": ["personal", "essentials", "personligt"],
+      "translations": {
+        "sv": {
+          "name": "Hygienartiklar",
+          "description": "Personlig hygien"
+        }
+      }
+    },
+    {
+      "name": "Consumables",
+      "description": "Household consumables",
+      "tags": ["household", "essentials", "hus", "huset", "bostad", "bostadshushåll"],
+      "translations": {
+        "sv": {
+          "name": "Förbrukningsvaror",
+          "description": "Hushållsförbrukningsvaror"
+        }
+      }
+    },
+    {
+      "name": "Home Equipment",
+      "description": "Household equipment and furnishings",
+      "tags": ["household", "discretionary", "hus", "huset", "bostad", "bostadshushåll"],
+      "translations": {
+        "sv": {
+          "name": "Hemutrustning",
+          "description": "Hushållsutrustning och möbler"
+        }
+      }
+    },
+    {
+      "name": "Lunch Expenses",
+      "description": "Work/school lunch expenses",
+      "tags": ["food", "work", "mat"],
+      "translations": {
+        "sv": {
+          "name": "Lunchkostnader",
+          "description": "Lunch på arbete/skola"
+        }
+      }
+    },
+    {
+      "name": "Public Transport",
+      "description": "Public transportation",
+      "tags": ["transportation", "transport"],
+      "translations": {
+        "sv": {
+          "name": "Kollektivresor",
+          "description": "Kollektivtrafik"
+        }
+      }
+    },
+    {
+      "name": "Healthcare",
+      "description": "Medical, dental, and medicine expenses",
+      "tags": ["health", "personligt"],
+      "translations": {
+        "sv": {
+          "name": "Läkare, tandläkare, medicin",
+          "description": "Utgifter för läkare, tandläkare och medicin"
+        }
+      }
+    },
+    {
+      "name": "Savings",
+      "description": "Regular savings",
+      "tags": ["savings", "investment"],
+      "translations": {
+        "sv": {
+          "name": "Sparande",
+          "description": "Regelbundet sparande"
+        }
+      }
+    }
+  ],
+  "categories": [
+    {
+      "name": "Income - Jacob",
+      "description": "Jacob's income",
+      "type": "Income",
+      "translations": {
+        "sv": {
+          "name": "Inkomster - Jacob",
+          "description": "Jacobs inkomster"
+        }
+      },
+      "subcategories": ["Salary", "Sales", "Gift"]
+    },
+    {
+      "name": "Income - Elin",
+      "description": "Elin's income",
+      "type": "Income",
+      "translations": {
+        "sv": {
+          "name": "Inkomster - Elin",
+          "description": "Elins inkomster"
+        }
+      },
+      "subcategories": ["Salary", "Sales", "Gift"]
+    },
+    {
+      "name": "Housing - Röde Orms gränd",
+      "description": "Röde Orms gränd's housing related expenses",
+      "type": "Property",
+      "translations": {
+        "sv": {
+          "name": "Bostad - Röde Orms gränd",
+          "description": "Boenderelaterade utgifter för Röde Orms gränd"
         }
       },
       "subcategories": [
-        {
-          "name": "Heating",
-          "description": "Heating costs",
-          "translations": {
-            "sv": {
-              "name": "Värme",
-              "description": "Värmekostnader"
-            }
-          }
-        },
-        {
-          "name": "Electricity",
-          "description": "Household electricity",
-          "translations": {
-            "sv": {
-              "name": "Hushållsel",
-              "description": "Hushållsel"
-            }
-          }
-        },
-        {
-          "name": "Water and Sewage",
-          "description": "Water and sewage fees",
-          "translations": {
-            "sv": {
-              "name": "Vatten och avlopp",
-              "description": "Vatten- och avloppsavgifter"
-            }
-          }
-        },
-        {
-          "name": "Waste Management",
-          "description": "Waste management fees",
-          "translations": {
-            "sv": {
-              "name": "Renhållningsavgift",
-              "description": "Avgifter för sophämtning och återvinning"
-            }
-          }
-        },
-        {
-          "name": "Maintenance/Repairs",
-          "description": "Home maintenance and repairs",
-          "translations": {
-            "sv": {
-              "name": "Underhåll/reparationer",
-              "description": "Underhåll och reparationer av bostaden"
-            }
-          }
-        },
-        {
-          "name": "Other",
-          "description": "Other housing related expenses",
-          "translations": {
-            "sv": {
-              "name": "Övrigt",
-              "description": "Övriga boenderelaterade utgifter"
-            }
-          }
-        },
-        {
-          "name": "Home Insurance",
-          "description": "House insurance",
-          "translations": {
-            "sv": {
-              "name": "Villahemförsäkring",
-              "description": "Försäkring för villan"
-            }
-          }
-        },
-        {
-          "name": "Property Tax",
-          "description": "Property tax payments",
-          "translations": {
-            "sv": {
-              "name": "Fastighetsskatt",
-              "description": "Fastighetsskatt"
-            }
-          }
-        },
-        {
-          "name": "Loan Interest",
-          "description": "Mortgage interest payments",
-          "translations": {
-            "sv": {
-              "name": "Lån Ränta",
-              "description": "Räntebetalningar på bostadslån"
-            }
-          }
-        },
-        {
-          "name": "Loan Amortization",
-          "description": "Mortgage principal payments",
-          "translations": {
-            "sv": {
-              "name": "Lån Amortering",
-              "description": "Amortering på bostadslån"
-            }
-          }
-        }
+        "Heating",
+        "Electricity",
+        "Water and Sewage",
+        "Waste Management",
+        "Household Maintenance/Repairs",
+        "Other",
+        "Home Insurance",
+        "Property Tax",
+        "House Loan Interest",
+        "House Loan Amortization"
       ]
     },
     {
       "name": "Vehicle",
       "description": "Vehicle related expenses",
-      "typeId": 3,
+      "type": "Vehicle",
       "translations": {
         "sv": {
           "name": "Fordon",
@@ -224,102 +502,19 @@
         }
       },
       "subcategories": [
-        {
-          "name": "Tax",
-          "description": "Vehicle tax",
-          "translations": {
-            "sv": {
-              "name": "Skatt",
-              "description": "Fordonsskatt"
-            }
-          }
-        },
-        {
-          "name": "Inspection",
-          "description": "Vehicle inspection",
-          "translations": {
-            "sv": {
-              "name": "Besiktning",
-              "description": "Fordonsbesiktning"
-            }
-          }
-        },
-        {
-          "name": "Insurance",
-          "description": "Vehicle insurance",
-          "translations": {
-            "sv": {
-              "name": "Försäkring",
-              "description": "Fordonsförsäkring"
-            }
-          }
-        },
-        {
-          "name": "Tires",
-          "description": "Tire related expenses",
-          "translations": {
-            "sv": {
-              "name": "Däck",
-              "description": "Däckrelaterade utgifter"
-            }
-          }
-        },
-        {
-          "name": "Repairs and Service",
-          "description": "Vehicle repairs and maintenance",
-          "translations": {
-            "sv": {
-              "name": "Reparationer och service",
-              "description": "Reparationer och underhåll av fordon"
-            }
-          }
-        },
-        {
-          "name": "Parking",
-          "description": "Parking fees",
-          "translations": {
-            "sv": {
-              "name": "Parkering",
-              "description": "Parkeringsavgifter"
-            }
-          }
-        },
-        {
-          "name": "Other",
-          "description": "Other vehicle related expenses",
-          "translations": {
-            "sv": {
-              "name": "Övrigt",
-              "description": "Övriga fordonsrelaterade utgifter"
-            }
-          }
-        },
-        {
-          "name": "Loan Interest",
-          "description": "Vehicle loan interest",
-          "translations": {
-            "sv": {
-              "name": "Lån Ränta",
-              "description": "Ränta på fordonslån"
-            }
-          }
-        },
-        {
-          "name": "Loan Amortization",
-          "description": "Vehicle loan principal payments",
-          "translations": {
-            "sv": {
-              "name": "Lån Amortering",
-              "description": "Amortering på fordonslån"
-            }
-          }
-        }
+        "Vehicle Tax",
+        "Vehicle Inspection",
+        "Vehicle Insurance",
+        "Tires",
+        "Vehicle Repairs and Service",
+        "Parking",
+        "Other"
       ]
     },
     {
       "name": "Fixed Costs",
       "description": "Regular monthly expenses",
-      "typeId": 4,
+      "type": "Fixed Costs",
       "translations": {
         "sv": {
           "name": "Fasta kostnader",
@@ -327,62 +522,17 @@
         }
       },
       "subcategories": [
-        {
-          "name": "Media",
-          "description": "TV, internet, streaming services",
-          "translations": {
-            "sv": {
-              "name": "Medier",
-              "description": "TV, internet, streamingtjänster"
-            }
-          }
-        },
-        {
-          "name": "Other Insurance",
-          "description": "Other insurance policies",
-          "translations": {
-            "sv": {
-              "name": "Övriga försäkringar",
-              "description": "Övriga försäkringar"
-            }
-          }
-        },
-        {
-          "name": "Union and Unemployment",
-          "description": "Union fees and unemployment insurance",
-          "translations": {
-            "sv": {
-              "name": "A-kassa och fackavgift",
-              "description": "Avgifter för a-kassa och fackförening"
-            }
-          }
-        },
-        {
-          "name": "Childcare & Support",
-          "description": "Childcare and child support payments",
-          "translations": {
-            "sv": {
-              "name": "Barnomsorg & underhållsbidrag",
-              "description": "Kostnader för barnomsorg och underhållsbidrag"
-            }
-          }
-        },
-        {
-          "name": "Student Loan Payment",
-          "description": "Student loan repayments",
-          "translations": {
-            "sv": {
-              "name": "Återbetalning CSN-lån",
-              "description": "Återbetalning av studielån"
-            }
-          }
-        }
+        "Media",
+        "Other Insurance",
+        "Union and Unemployment",
+        "Childcare & Support",
+        "Student Loan Payment"
       ]
     },
     {
       "name": "Variable Costs",
       "description": "Variable monthly expenses",
-      "typeId": 5,
+      "type": "Variable Costs",
       "translations": {
         "sv": {
           "name": "Rörliga kostnader",
@@ -390,126 +540,18 @@
         }
       },
       "subcategories": [
-        {
-          "name": "Groceries",
-          "description": "Food and groceries",
-          "translations": {
-            "sv": {
-              "name": "Livsmedel",
-              "description": "Mat och dagligvaror"
-            }
-          }
-        },
-        {
-          "name": "Clothes and Shoes",
-          "description": "Clothing and footwear",
-          "translations": {
-            "sv": {
-              "name": "Kläder och skor",
-              "description": "Kläder och skodon"
-            }
-          }
-        },
-        {
-          "name": "Leisure/Play",
-          "description": "Entertainment and recreation",
-          "translations": {
-            "sv": {
-              "name": "Fritid/lek",
-              "description": "Underhållning och rekreation"
-            }
-          }
-        },
-        {
-          "name": "Mobile Phone",
-          "description": "Mobile phone expenses",
-          "translations": {
-            "sv": {
-              "name": "Mobiltelefon",
-              "description": "Mobiltelefonutgifter"
-            }
-          }
-        },
-        {
-          "name": "Hygiene Products",
-          "description": "Personal care items",
-          "translations": {
-            "sv": {
-              "name": "Hygienartiklar",
-              "description": "Personlig hygien"
-            }
-          }
-        },
-        {
-          "name": "Consumables",
-          "description": "Household consumables",
-          "translations": {
-            "sv": {
-              "name": "Förbrukningsvaror",
-              "description": "Hushållsförbrukningsvaror"
-            }
-          }
-        },
-        {
-          "name": "Home Equipment",
-          "description": "Household equipment and furnishings",
-          "translations": {
-            "sv": {
-              "name": "Hemutrustning",
-              "description": "Hushållsutrustning och möbler"
-            }
-          }
-        },
-        {
-          "name": "Lunch Expenses",
-          "description": "Work/school lunch expenses",
-          "translations": {
-            "sv": {
-              "name": "Lunchkostnader",
-              "description": "Lunch på arbete/skola"
-            }
-          }
-        },
-        {
-          "name": "Public Transport",
-          "description": "Public transportation",
-          "translations": {
-            "sv": {
-              "name": "Kollektivresor",
-              "description": "Kollektivtrafik"
-            }
-          }
-        },
-        {
-          "name": "Healthcare",
-          "description": "Medical, dental, and medicine expenses",
-          "translations": {
-            "sv": {
-              "name": "Läkare, tandläkare, medicin",
-              "description": "Utgifter för läkare, tandläkare och medicin"
-            }
-          }
-        },
-        {
-          "name": "Savings",
-          "description": "Regular savings",
-          "translations": {
-            "sv": {
-              "name": "Sparande",
-              "description": "Regelbundet sparande"
-            }
-          }
-        },
-        {
-          "name": "Other Expenses",
-          "description": "Other variable expenses",
-          "translations": {
-            "sv": {
-              "name": "Andra kostnader",
-              "description": "Övriga rörliga kostnader"
-            }
-          }
-        }
+        "Groceries",
+        "Clothes and Shoes",
+        "Leisure/Play",
+        "Mobile Phone",
+        "Hygiene Products",
+        "Consumables",
+        "Home Equipment",
+        "Lunch Expenses",
+        "Public Transport",
+        "Healthcare",
+        "Savings",
+        "Other"
       ]
     }
   ]

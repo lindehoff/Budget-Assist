@@ -2,6 +2,7 @@ package category
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -44,17 +45,20 @@ type CreateCategoryRequest struct {
 	TypeID             uint
 	InstanceIdentifier string
 	Translations       map[string]TranslationData
-	Subcategories      []uint // List of subcategory IDs to link
+	SubcategoryIds     []uint // List of subcategory IDs to link
 }
 
 // CreateSubcategoryRequest represents the data needed to create a new subcategory
 type CreateSubcategoryRequest struct {
+	ID                 uint // Optional ID for system subcategories
 	Name               string
 	Description        string
+	CategoryTypeID     uint
 	InstanceIdentifier string
 	Translations       map[string]TranslationData
-	Categories         []uint // List of category IDs to link
-	IsSystem           bool   // Whether this is a system subcategory
+	CategoryIds        []uint   // List of category IDs to link
+	IsSystem           bool     // Whether this is a system subcategory
+	Tags               []string // Tags for the subcategory
 }
 
 // TranslationData represents translation information
@@ -97,29 +101,32 @@ func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest)
 
 	// Create the category
 	category := &db.Category{
+		Name:               req.Name,
+		Description:        req.Description,
 		TypeID:             req.TypeID,
 		InstanceIdentifier: req.InstanceIdentifier,
 		IsActive:           true,
 	}
 
-	// Create translations
+	// Always add English translation
+	enTranslation := db.Translation{
+		EntityType:   string(db.EntityTypeCategory),
+		LanguageCode: db.LangEN,
+		Name:         req.Name,
+		Description:  req.Description,
+	}
+	category.Translations = append(category.Translations, enTranslation)
+
+	// Create translations for other languages
 	for langCode, data := range req.Translations {
+		if langCode == db.LangEN {
+			continue // Skip English as it's already added
+		}
 		translation := &db.Translation{
 			EntityType:   string(db.EntityTypeCategory),
 			LanguageCode: langCode,
 			Name:         data.Name,
 			Description:  data.Description,
-		}
-		category.Translations = append(category.Translations, *translation)
-	}
-
-	// Add default English translation if not provided
-	if _, exists := req.Translations[db.LangEN]; !exists {
-		translation := &db.Translation{
-			EntityType:   string(db.EntityTypeCategory),
-			LanguageCode: db.LangEN,
-			Name:         req.Name,
-			Description:  req.Description,
 		}
 		category.Translations = append(category.Translations, *translation)
 	}
@@ -134,8 +141,8 @@ func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest)
 	}
 
 	// Link subcategories if provided
-	if len(req.Subcategories) > 0 {
-		for _, subcatID := range req.Subcategories {
+	if len(req.SubcategoryIds) > 0 {
+		for _, subcatID := range req.SubcategoryIds {
 			link := &db.CategorySubcategory{
 				CategoryID:    category.ID,
 				SubcategoryID: subcatID,
@@ -165,19 +172,40 @@ func (m *Manager) CreateSubcategory(ctx context.Context, req CreateSubcategoryRe
 
 	// Create the subcategory
 	subcategory := &db.Subcategory{
+		Name:               req.Name,
+		Description:        req.Description,
+		CategoryTypeID:     req.CategoryTypeID,
 		InstanceIdentifier: req.InstanceIdentifier,
 		IsActive:           true,
+		IsSystem:           req.IsSystem,
+	}
+
+	if req.ID > 0 {
+		subcategory.ID = req.ID
 	}
 
 	// Create translations
 	for langCode, data := range req.Translations {
 		translation := &db.Translation{
-			EntityType:   "subcategory",
+			EntityType:   string(db.EntityTypeSubcategory),
 			LanguageCode: langCode,
 			Name:         data.Name,
 			Description:  data.Description,
 		}
 		subcategory.Translations = append(subcategory.Translations, *translation)
+	}
+
+	// Convert tags to JSON string
+	if len(req.Tags) > 0 {
+		tagsJSON, err := json.Marshal(req.Tags)
+		if err != nil {
+			return nil, CategoryError{
+				Operation: "create_subcategory",
+				Category:  req.Name,
+				Err:       fmt.Errorf("failed to marshal tags: %w", err),
+			}
+		}
+		subcategory.Tags = string(tagsJSON)
 	}
 
 	// Create subcategory first
@@ -190,8 +218,8 @@ func (m *Manager) CreateSubcategory(ctx context.Context, req CreateSubcategoryRe
 	}
 
 	// Link categories if provided
-	if len(req.Categories) > 0 {
-		for _, catID := range req.Categories {
+	if len(req.CategoryIds) > 0 {
+		for _, catID := range req.CategoryIds {
 			link := &db.CategorySubcategory{
 				CategoryID:    catID,
 				SubcategoryID: subcategory.ID,

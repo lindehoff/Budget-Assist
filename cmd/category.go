@@ -226,16 +226,19 @@ Optional:
 		}
 
 		// Convert category names to IDs
-		var categoryIDs []uint
+		var categoryIds []uint
 		if len(categories) > 0 {
 			// TODO: Implement category lookup by name
 			return fmt.Errorf("category lookup by name not yet implemented")
 		}
 
 		req := category.CreateSubcategoryRequest{
+			Name:               name,
+			Description:        description,
 			IsSystem:           isSystem,
 			InstanceIdentifier: instanceID,
-			Categories:         categoryIDs,
+			CategoryIds:        categoryIds,
+			CategoryTypeID:     1, // Default to type 1 for now
 			Translations:       translations,
 		}
 
@@ -406,9 +409,8 @@ var categoryImportCmd = &cobra.Command{
 	
 The file should contain:
 - Category types with translations
-- Categories with translations
-- Subcategories with translations
-- Category-subcategory relationships`,
+- Subcategories with translations and IDs
+- Categories with translations and subcategory IDs`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filePath := args[0]
@@ -432,6 +434,15 @@ The file should contain:
 					Description string `json:"description"`
 				} `json:"translations"`
 			} `json:"categoryTypes"`
+			Subcategories []struct {
+				ID           uint   `json:"id"`
+				Name         string `json:"name"`
+				Description  string `json:"description"`
+				Translations map[string]struct {
+					Name        string `json:"name"`
+					Description string `json:"description"`
+				} `json:"translations"`
+			} `json:"subcategories"`
 			Categories []struct {
 				Name         string `json:"name"`
 				Description  string `json:"description"`
@@ -440,12 +451,7 @@ The file should contain:
 					Name        string `json:"name"`
 					Description string `json:"description"`
 				} `json:"translations"`
-				Subcategories []struct {
-					Translations map[string]struct {
-						Name        string `json:"name"`
-						Description string `json:"description"`
-					} `json:"translations"`
-				} `json:"subcategories"`
+				SubcategoryIds []uint `json:"subcategoryIds"`
 			} `json:"categories"`
 		}
 
@@ -457,135 +463,114 @@ The file should contain:
 			}
 		}
 
+		// Get services
+		store, err := getStore()
+		if err != nil {
+			return &CategoryError{
+				Operation: "import",
+				Resource:  filePath,
+				Err:       fmt.Errorf("failed to get store: %w", err),
+			}
+		}
+
+		aiService, err := getAIService()
+		if err != nil {
+			return &CategoryError{
+				Operation: "import",
+				Resource:  filePath,
+				Err:       fmt.Errorf("failed to get AI service: %w", err),
+			}
+		}
+
+		categoryManager := category.NewManager(store, aiService, slog.Default())
+
 		// First create category types
-		typeMap := make(map[string]uint) // name -> ID mapping
 		for _, ct := range importData.CategoryTypes {
-			// Create translations map
-			translations := make(map[string]category.TranslationData)
-			for lang, trans := range ct.Translations {
-				translations[lang] = category.TranslationData{
-					Name:        trans.Name,
-					Description: trans.Description,
-				}
-			}
-
-			// Add English translation from the name/description fields
-			translations[db.LangEN] = category.TranslationData{
-				Name:        ct.Name,
-				Description: ct.Description,
-			}
-
 			categoryType := &db.CategoryType{
 				Name:        ct.Name,
 				Description: ct.Description,
 				IsMultiple:  ct.IsMultiple,
 			}
 
-			// Create the category type
 			if err := categoryManager.CreateCategoryType(cmd.Context(), categoryType); err != nil {
 				return &CategoryError{
-					Operation: "create_category_type",
-					Resource:  ct.Name,
-					Err:       err,
+					Operation: "import",
+					Resource:  filePath,
+					Err:       fmt.Errorf("failed to create category type %q: %w", ct.Name, err),
 				}
 			}
 
 			// Create translations
-			for lang, trans := range translations {
+			for lang, transl := range ct.Translations {
 				translation := &db.Translation{
 					EntityID:     categoryType.ID,
 					EntityType:   string(db.EntityTypeCategoryType),
 					LanguageCode: lang,
-					Name:         trans.Name,
-					Description:  trans.Description,
+					Name:         transl.Name,
+					Description:  transl.Description,
 				}
 				if err := categoryManager.CreateTranslation(cmd.Context(), translation); err != nil {
 					return &CategoryError{
-						Operation: "create_translation",
-						Resource:  fmt.Sprintf("category_type_%d", categoryType.ID),
-						Err:       err,
+						Operation: "import",
+						Resource:  filePath,
+						Err:       fmt.Errorf("failed to create translation for category type %q: %w", ct.Name, err),
 					}
 				}
 			}
-
-			typeMap[ct.Name] = categoryType.ID
-			fmt.Printf("Successfully imported category type %q\n", categoryType.GetTranslation(db.LangEN))
 		}
 
 		// Then create subcategories
-		subcategoryMap := make(map[string]uint) // name -> ID mapping
-		for _, cat := range importData.Categories {
-			for _, subcat := range cat.Subcategories {
-				translations := make(map[string]category.TranslationData)
-				for lang, trans := range subcat.Translations {
-					translations[lang] = category.TranslationData{
-						Name:        trans.Name,
-						Description: trans.Description,
-					}
-				}
+		for _, sub := range importData.Subcategories {
+			req := category.CreateSubcategoryRequest{
+				ID:             sub.ID,
+				Name:           sub.Name,
+				Description:    sub.Description,
+				IsSystem:       true,
+				CategoryTypeID: 1,        // Default to type 1 for now
+				CategoryIds:    []uint{}, // Empty slice since we'll link categories later
+				Translations:   make(map[string]category.TranslationData),
+			}
 
-				// Get the English name for reference
-				enName := subcat.Translations[db.LangEN].Name
-
-				req := category.CreateSubcategoryRequest{
-					IsSystem:     true,
-					Translations: translations,
+			for lang, transl := range sub.Translations {
+				req.Translations[lang] = category.TranslationData{
+					Name:        transl.Name,
+					Description: transl.Description,
 				}
+			}
 
-				subcatObj, err := categoryManager.CreateSubcategory(cmd.Context(), req)
-				if err != nil {
-					return &CategoryError{
-						Operation: "import_subcategory",
-						Resource:  enName,
-						Err:       err,
-					}
+			if _, err := categoryManager.CreateSubcategory(cmd.Context(), req); err != nil {
+				return &CategoryError{
+					Operation: "import",
+					Resource:  filePath,
+					Err:       fmt.Errorf("failed to create subcategory %q: %w", sub.Name, err),
 				}
-				subcategoryMap[enName] = subcatObj.ID
-				name := subcatObj.GetName(db.LangEN)
-				fmt.Printf("Successfully imported subcategory %q\n", name)
 			}
 		}
 
 		// Finally create categories and link subcategories
 		for _, cat := range importData.Categories {
-			translations := make(map[string]category.TranslationData)
-			for lang, trans := range cat.Translations {
-				translations[lang] = category.TranslationData{
-					Name:        trans.Name,
-					Description: trans.Description,
-				}
-			}
-
-			// Add English translation from the name/description fields
-			translations[db.LangEN] = category.TranslationData{
-				Name:        cat.Name,
-				Description: cat.Description,
-			}
-
-			var subcategoryIDs []uint
-			for _, subcat := range cat.Subcategories {
-				enName := subcat.Translations[db.LangEN].Name
-				if id, ok := subcategoryMap[enName]; ok {
-					subcategoryIDs = append(subcategoryIDs, id)
-				}
-			}
-
 			req := category.CreateCategoryRequest{
-				TypeID:        cat.TypeID,
-				Translations:  translations,
-				Subcategories: subcategoryIDs,
+				Name:           cat.Name,
+				Description:    cat.Description,
+				TypeID:         cat.TypeID,
+				SubcategoryIds: cat.SubcategoryIds,
+				Translations:   make(map[string]category.TranslationData),
 			}
 
-			mainCat, err := categoryManager.CreateCategory(cmd.Context(), req)
-			if err != nil {
-				return &CategoryError{
-					Operation: "import_category",
-					Resource:  translations[db.LangEN].Name,
-					Err:       err,
+			for lang, transl := range cat.Translations {
+				req.Translations[lang] = category.TranslationData{
+					Name:        transl.Name,
+					Description: transl.Description,
 				}
 			}
-			name := mainCat.GetName(db.LangEN)
-			fmt.Printf("Successfully imported category %q with %d subcategories\n", name, len(subcategoryIDs))
+
+			if _, err := categoryManager.CreateCategory(cmd.Context(), req); err != nil {
+				return &CategoryError{
+					Operation: "import",
+					Resource:  filePath,
+					Err:       fmt.Errorf("failed to create category %q: %w", cat.Name, err),
+				}
+			}
 		}
 
 		return nil
