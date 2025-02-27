@@ -453,3 +453,26 @@ func (m *Manager) CreateCategoryType(ctx context.Context, categoryType *db.Categ
 	}
 	return nil
 }
+
+// CreateCategoryWithTranslations creates a new category with the given translations
+func (m *Manager) CreateCategoryWithTranslations(ctx context.Context, name, description string, typeID uint, translations map[string]TranslationData, subcategoryIDs []uint) (*db.Category, error) {
+	req := CreateCategoryRequest{
+		Name:          name,
+		Description:   description,
+		TypeID:        typeID,
+		Subcategories: subcategoryIDs,
+		Translations:  translations,
+	}
+
+	return m.CreateCategory(ctx, req)
+}
+
+// CreateSubcategoryWithTranslations creates a new subcategory with the given translations
+func (m *Manager) CreateSubcategoryWithTranslations(ctx context.Context, name, description string, isSystem bool, translations map[string]TranslationData) (*db.Subcategory, error) {
+	req := CreateSubcategoryRequest{
+		IsSystem:     isSystem,
+		Translations: translations,
+	}
+
+	return m.CreateSubcategory(ctx, req)
+}

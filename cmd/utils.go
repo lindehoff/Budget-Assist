@@ -20,12 +20,13 @@ func getStore() (db.Store, error) {
 		ImportDefaultPrompts:    viper.GetBool("database.import_default_prompts"),
 	}
 
-	gormDB, err := db.Initialize(config)
+	logger := slog.Default()
+	gormDB, err := db.Initialize(config, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
-	return db.NewStore(gormDB, slog.Default()), nil
+	return db.NewStore(gormDB, logger), nil
 }
 
 // getAIService returns a new AI service instance

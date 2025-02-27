@@ -46,17 +46,18 @@ func setupTestDB(t *testing.T) (context.Context, *gorm.DB) {
 		DBPath: tempDir + "/test.db",
 	}
 
-	db, err := Initialize(config)
+	db, err := Initialize(config, logger)
 	if err != nil {
-		os.RemoveAll(tempDir)
-		t.Fatalf("failed to initialize test database: %v", err)
+		t.Fatalf("failed to initialize database: %v", err)
 	}
 
 	t.Cleanup(func() {
 		if err := closeTestDB(db); err != nil {
-			t.Errorf("failed to close database: %v", err)
+			t.Errorf("failed to close test database: %v", err)
 		}
-		os.RemoveAll(tempDir)
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Errorf("failed to remove temp dir: %v", err)
+		}
 	})
 
 	return ctx, db

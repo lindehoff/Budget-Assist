@@ -686,17 +686,22 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 				cat.GetDescription(db.LangEN),
 				active,
 			})
-		}
 
-		for _, sub := range subcategories {
-			active := formatActive(sub.IsActive)
-			table.Append([]string{
-				"Subcategory",
-				fmt.Sprintf("%d", sub.ID),
-				sub.GetName(db.LangEN),
-				sub.GetDescription(db.LangEN),
-				active,
-			})
+			// Add subcategories under their parent category
+			for _, catSub := range cat.Subcategories {
+				if !catSub.IsActive {
+					continue
+				}
+				sub := catSub.Subcategory
+				active := formatActive(sub.IsActive)
+				table.Append([]string{
+					"  ↳ Subcategory", // Indented with arrow to show hierarchy
+					fmt.Sprintf("%d", sub.ID),
+					sub.GetName(db.LangEN),
+					sub.GetDescription(db.LangEN),
+					active,
+				})
+			}
 		}
 
 		table.Render()
