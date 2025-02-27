@@ -7,6 +7,7 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -63,8 +64,8 @@ type Category struct {
 	Description        string `gorm:"size:500"`
 	TypeID             uint   `gorm:"not null"`
 	InstanceIdentifier string
-	IsActive           bool `gorm:"default:true"`
-	Subcategories      []CategorySubcategory
+	IsActive           bool          `gorm:"default:true"`
+	Subcategories      []Subcategory `gorm:"many2many:category_subcategories;"`
 	Translations       []Translation `gorm:"polymorphic:Entity;polymorphicValue:category"`
 }
 
@@ -126,12 +127,13 @@ type Subcategory struct {
 	gorm.Model
 	Name               string `gorm:"not null;size:100"`
 	Description        string `gorm:"size:500"`
-	CategoryTypeID     uint
+	CategoryTypeID     uint   `gorm:"not null"`
 	InstanceIdentifier string
-	IsActive           bool `gorm:"default:true"`
-	IsSystem           bool `gorm:"default:false"`
-	Categories         []CategorySubcategory
-	Translations       []Translation `gorm:"polymorphic:Entity"`
+	IsActive           bool          `gorm:"default:true"`
+	IsSystem           bool          `gorm:"default:false"`
+	Tags               string        `gorm:"size:500"` // JSON string of tags for this subcategory
+	Categories         []Category    `gorm:"many2many:category_subcategories;"`
+	Translations       []Translation `gorm:"polymorphic:Entity;polymorphicValue:subcategory"`
 }
 
 // GetName returns the translated name for the given language code
@@ -294,4 +296,29 @@ type Prompt struct {
 	Rules        string `gorm:"type:text"` // JSON string of rules
 	Version      string `gorm:"not null;size:20"`
 	IsActive     bool   `gorm:"not null"`
+}
+
+// GetTags returns the tags as a string slice
+func (s *Subcategory) GetTags() []string {
+	if s.Tags == "" {
+		return []string{}
+	}
+
+	var tags []string
+	if err := json.Unmarshal([]byte(s.Tags), &tags); err != nil {
+		// If there's an error, return an empty slice
+		return []string{}
+	}
+	return tags
+}
+
+// HasTag checks if the subcategory has a specific tag
+func (s *Subcategory) HasTag(tag string) bool {
+	tags := s.GetTags()
+	for _, t := range tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
 }

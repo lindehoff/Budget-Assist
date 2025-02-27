@@ -15,6 +15,7 @@ type TransactionFilter struct {
 	SubcategoryID *uint
 	StartDate     *time.Time
 	EndDate       *time.Time
+	TagFilter     *string // Optional tag to filter transactions by subcategory tag
 }
 
 // Store defines the interface for database operations
@@ -37,6 +38,7 @@ type Store interface {
 	UpdateSubcategory(ctx context.Context, subcategory *Subcategory) error
 	GetSubcategoryByID(ctx context.Context, id uint) (*Subcategory, error)
 	ListSubcategories(ctx context.Context) ([]Subcategory, error)
+	FindSubcategoriesByTag(ctx context.Context, tag string) ([]Subcategory, error)
 	DeleteSubcategory(ctx context.Context, id uint) error
 
 	// Category-Subcategory relationship operations
@@ -168,8 +170,7 @@ func (s *SQLStore) ListCategories(ctx context.Context, typeID *uint) ([]Category
 	query := s.db.WithContext(ctx).
 		Preload("Translations").
 		Preload("Subcategories").
-		Preload("Subcategories.Subcategory").
-		Preload("Subcategories.Subcategory.Translations")
+		Preload("Subcategories.Translations")
 	if typeID != nil {
 		query = query.Where("type_id = ?", *typeID)
 	}
@@ -370,6 +371,9 @@ func (s *SQLStore) ListTransactions(ctx context.Context, filter *TransactionFilt
 		if filter.EndDate != nil {
 			query = query.Where("created_at <= ?", *filter.EndDate)
 		}
+		if filter.TagFilter != nil {
+			query = query.Where("subcategory_tag LIKE ?", *filter.TagFilter)
+		}
 	}
 	result := query.Find(&transactions)
 	if result.Error != nil {
@@ -504,4 +508,32 @@ func (s *SQLStore) GetTranslations(ctx context.Context, entityID uint, entityTyp
 	}
 
 	return translations, nil
+}
+
+// FindSubcategoriesByTag retrieves subcategories by tag
+func (s *SQLStore) FindSubcategoriesByTag(ctx context.Context, tag string) ([]Subcategory, error) {
+	var subcategories []Subcategory
+
+	// Since tags are stored as a JSON array in a string field, we need to use LIKE for searching
+	// This is not the most efficient way, but it works for our purposes
+	searchPattern := fmt.Sprintf("%%\"%s\"%%", tag)
+	result := s.db.WithContext(ctx).
+		Where("tags LIKE ?", searchPattern).
+		Preload("Translations").
+		Find(&subcategories)
+
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to find subcategories by tag: %w", result.Error)
+	}
+
+	// Filter the results in memory to ensure we only get exact tag matches
+	// This is needed because the LIKE query might match partial tag names
+	var filteredSubcategories []Subcategory
+	for _, sub := range subcategories {
+		if sub.HasTag(tag) {
+			filteredSubcategories = append(filteredSubcategories, sub)
+		}
+	}
+
+	return filteredSubcategories, nil
 }
