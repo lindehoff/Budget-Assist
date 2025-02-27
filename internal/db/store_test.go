@@ -16,8 +16,14 @@ func createTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to connect database: %v", err)
 	}
 
-	// Auto migrate the schema
-	if err := db.AutoMigrate(&Category{}, &CategoryType{}, &Translation{}); err != nil {
+	// Auto migrate all required tables
+	if err := db.AutoMigrate(
+		&Category{},
+		&CategoryType{},
+		&Translation{},
+		&CategorySubcategory{},
+		&Subcategory{},
+	); err != nil {
 		t.Fatalf("failed to migrate database: %v", err)
 	}
 
@@ -33,8 +39,10 @@ func createTestStore(t *testing.T) (Store, *gorm.DB) {
 func createTestCategory(t *testing.T, store Store, name string, typeID uint) *Category {
 	t.Helper()
 	category := &Category{
-		TypeID:   typeID,
-		IsActive: true,
+		Name:        name,
+		Description: "Test description",
+		TypeID:      typeID,
+		IsActive:    true,
 	}
 	err := store.CreateCategory(context.Background(), category)
 	if err != nil {
@@ -58,7 +66,11 @@ func createTestCategory(t *testing.T, store Store, name string, typeID uint) *Ca
 
 func createTestCategoryType(t *testing.T, db *gorm.DB, name string) *CategoryType {
 	t.Helper()
-	categoryType := &CategoryType{}
+	categoryType := &CategoryType{
+		Name:        name,
+		Description: "Test type description",
+		IsMultiple:  false,
+	}
 	result := db.Create(categoryType)
 	if result.Error != nil {
 		t.Fatalf("failed to create test category type: %v", result.Error)
@@ -90,14 +102,24 @@ func TestSQLStore_CreateCategory(t *testing.T) {
 		{
 			name: "Successfully_create_valid_category",
 			category: &Category{
-				TypeID:   1,
-				IsActive: true,
+				Name:        "Test Category",
+				Description: "Test Description",
+				TypeID:      1,
+				IsActive:    true,
+				Translations: []Translation{
+					{
+						LanguageCode: LangEN,
+						Name:         "Test Category",
+						Description:  "Test Description",
+					},
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "Error_create_category_with_empty_type_id",
 			category: &Category{
+				Name:     "Test Category",
 				IsActive: true,
 			},
 			wantErr: true,
@@ -272,21 +294,14 @@ func TestSQLStore_GetTranslations(t *testing.T) {
 	store, _ := createTestStore(t)
 	category := createTestCategory(t, store, "Test Category", 1)
 
-	// Create test translations
+	// Create additional translations
 	translations := []Translation{
 		{
 			EntityID:     category.ID,
 			EntityType:   "category",
 			LanguageCode: "sv",
-			Name:         "Swedish Name",
-			Description:  "Swedish Description",
-		},
-		{
-			EntityID:     category.ID,
-			EntityType:   "category",
-			LanguageCode: "en",
-			Name:         "English Name",
-			Description:  "English Description",
+			Name:         "Test Kategori",
+			Description:  "Test Beskrivning",
 		},
 	}
 
@@ -297,38 +312,61 @@ func TestSQLStore_GetTranslations(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		entityID      uint
-		entityType    string
-		expectedCount int
-		wantErr       bool
+		name           string
+		entityID       uint
+		entityType     string
+		wantCount      int
+		wantLanguages  []string
+		wantErr        bool
+		expectedErrMsg string
 	}{
 		{
 			name:          "Successfully_get_translations",
 			entityID:      category.ID,
 			entityType:    "category",
-			expectedCount: 2,
+			wantCount:     2, // English (from createTestCategory) + Swedish
+			wantLanguages: []string{LangEN, "sv"},
 			wantErr:       false,
 		},
 		{
-			name:          "Successfully_handle_no_translations",
-			entityID:      999,
-			entityType:    "category",
-			expectedCount: 0,
-			wantErr:       false,
+			name:           "Error_get_translations_non_existent_entity",
+			entityID:       999,
+			entityType:     "category",
+			wantCount:      0,
+			wantLanguages:  nil,
+			wantErr:        true,
+			expectedErrMsg: "record not found",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := store.GetTranslations(context.Background(), tt.entityID, tt.entityType)
+			translations, err := store.GetTranslations(context.Background(), tt.entityID, tt.entityType)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SQLStore.GetTranslations() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			if tt.wantErr {
+				if err.Error() != tt.expectedErrMsg {
+					t.Errorf("SQLStore.GetTranslations() error message = %v, want %v", err.Error(), tt.expectedErrMsg)
+				}
+				return
+			}
 
-			if len(got) != tt.expectedCount {
-				t.Errorf("SQLStore.GetTranslations() got %d translations, want %d", len(got), tt.expectedCount)
+			if len(translations) != tt.wantCount {
+				t.Errorf("SQLStore.GetTranslations() got %d translations, want %d", len(translations), tt.wantCount)
+				return
+			}
+
+			// Check that we got all expected languages
+			langMap := make(map[string]bool)
+			for _, tr := range translations {
+				langMap[tr.LanguageCode] = true
+			}
+			for _, lang := range tt.wantLanguages {
+				if !langMap[lang] {
+					t.Errorf("SQLStore.GetTranslations() missing translation for language %q", lang)
+				}
 			}
 		})
 	}

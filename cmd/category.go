@@ -13,6 +13,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Output format constants
+const (
+	outputFormatJSON  = "json"
+	outputFormatTable = "table"
+)
+
+// Status symbols
+const (
+	statusActive   = "✓"
+	statusInactive = "✗"
+)
+
 // CategoryError represents category command-related errors
 type CategoryError struct {
 	Operation string
@@ -103,9 +115,9 @@ The output includes:
 		}
 
 		switch format {
-		case "json":
+		case outputFormatJSON:
 			return outputJSON(categories)
-		case "table":
+		case outputFormatTable:
 			return outputTable(categories)
 		default:
 			return fmt.Errorf("unsupported format: %s", format)
@@ -590,7 +602,7 @@ func init() {
 	rootCmd.AddCommand(categoryCmd)
 
 	// List command flags
-	categoryListCmd.Flags().StringP("format", "f", "table", "Output format (table|json)")
+	categoryListCmd.Flags().StringP("format", "f", outputFormatTable, "Output format (table|json)")
 	categoryListCmd.Flags().BoolP("subcategories", "s", false, "Include subcategories in output")
 
 	// Add category flags
@@ -633,10 +645,7 @@ func outputTable(categories []db.Category) error {
 	table.SetHeader([]string{"ID", "Name", "Description", "Type", "Active"})
 
 	for _, cat := range categories {
-		active := "✓"
-		if !cat.IsActive {
-			active = "✗"
-		}
+		active := formatActive(cat.IsActive)
 		table.Append([]string{
 			fmt.Sprintf("%d", cat.ID),
 			cat.GetName(db.LangEN),
@@ -662,17 +671,14 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 	}
 
 	switch format {
-	case "json":
+	case outputFormatJSON:
 		return printJSON(data)
-	case "table":
+	case outputFormatTable:
 		table := newTable()
 		table.SetHeader([]string{"Type", "ID", "Name", "Description", "Active"})
 
 		for _, cat := range categories {
-			active := "✓"
-			if !cat.IsActive {
-				active = "✗"
-			}
+			active := formatActive(cat.IsActive)
 			table.Append([]string{
 				"Category",
 				fmt.Sprintf("%d", cat.ID),
@@ -683,10 +689,7 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 		}
 
 		for _, sub := range subcategories {
-			active := "✓"
-			if !sub.IsActive {
-				active = "✗"
-			}
+			active := formatActive(sub.IsActive)
 			table.Append([]string{
 				"Subcategory",
 				fmt.Sprintf("%d", sub.ID),
@@ -760,4 +763,11 @@ func parseID(s string) (uint, error) {
 		return 0, err
 	}
 	return uint(id), nil
+}
+
+func formatActive(isActive bool) string {
+	if isActive {
+		return statusActive
+	}
+	return statusInactive
 }

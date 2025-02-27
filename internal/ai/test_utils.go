@@ -27,11 +27,11 @@ func NewMockStore() *MockStore {
 func (m *MockStore) CreateCategory(ctx context.Context, category *db.Category) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if category.Name == "" {
+	if category.Name == "" && len(category.Translations) == 0 {
 		return db.DatabaseOperationError{
 			Operation: "create",
 			Entity:    "category",
-			Err:       fmt.Errorf("category name is required"),
+			Err:       fmt.Errorf("either name or at least one translation is required"),
 		}
 	}
 	category.ID = m.nextID
@@ -77,6 +77,28 @@ func (m *MockStore) GetCategoryTypeByID(ctx context.Context, id uint) (*db.Categ
 }
 
 func (m *MockStore) CreateTranslation(ctx context.Context, translation *db.Translation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if translation.EntityType == string(db.EntityTypeCategory) {
+		category, exists := m.categories[translation.EntityID]
+		if !exists {
+			return db.ErrNotFound
+		}
+		// Update or add translation
+		found := false
+		for i, t := range category.Translations {
+			if t.LanguageCode == translation.LanguageCode {
+				category.Translations[i] = *translation
+				found = true
+				break
+			}
+		}
+		if !found {
+			category.Translations = append(category.Translations, *translation)
+		}
+		m.categories[translation.EntityID] = category
+	}
 	return nil
 }
 

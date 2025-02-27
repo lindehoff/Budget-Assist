@@ -100,17 +100,26 @@ func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest)
 		TypeID:             req.TypeID,
 		InstanceIdentifier: req.InstanceIdentifier,
 		IsActive:           true,
-		Name:               req.Name,
-		Description:        req.Description,
 	}
 
 	// Create translations
 	for langCode, data := range req.Translations {
 		translation := &db.Translation{
-			EntityType:   "category",
+			EntityType:   string(db.EntityTypeCategory),
 			LanguageCode: langCode,
 			Name:         data.Name,
 			Description:  data.Description,
+		}
+		category.Translations = append(category.Translations, *translation)
+	}
+
+	// Add default English translation if not provided
+	if _, exists := req.Translations[db.LangEN]; !exists {
+		translation := &db.Translation{
+			EntityType:   string(db.EntityTypeCategory),
+			LanguageCode: db.LangEN,
+			Name:         req.Name,
+			Description:  req.Description,
 		}
 		category.Translations = append(category.Translations, *translation)
 	}
@@ -218,12 +227,26 @@ func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategor
 		}
 	}
 
+	// Update basic fields
+	if req.Name != "" {
+		category.Name = req.Name
+	}
+	if req.Description != "" {
+		category.Description = req.Description
+	}
+	if req.IsActive != nil {
+		category.IsActive = *req.IsActive
+	}
+	if req.InstanceIdentifier != "" {
+		category.InstanceIdentifier = req.InstanceIdentifier
+	}
+
 	// Update translations if provided
 	if len(req.Translations) > 0 {
 		for langCode, data := range req.Translations {
 			translation := &db.Translation{
 				EntityID:     category.ID,
-				EntityType:   "category",
+				EntityType:   string(db.EntityTypeCategory),
 				LanguageCode: langCode,
 				Name:         data.Name,
 				Description:  data.Description,
@@ -237,18 +260,20 @@ func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategor
 		}
 	}
 
-	// Update other fields
-	if req.Name != "" {
-		category.Name = req.Name
-	}
-	if req.Description != "" {
-		category.Description = req.Description
-	}
-	if req.IsActive != nil {
-		category.IsActive = *req.IsActive
-	}
-	if req.InstanceIdentifier != "" {
-		category.InstanceIdentifier = req.InstanceIdentifier
+	// Update default English translation if name/description provided
+	if req.Name != "" || req.Description != "" {
+		translation := &db.Translation{
+			EntityID:     category.ID,
+			EntityType:   string(db.EntityTypeCategory),
+			LanguageCode: db.LangEN,
+			Name:         req.Name,
+			Description:  req.Description,
+		}
+		if err := m.store.CreateTranslation(ctx, translation); err != nil {
+			m.logger.Error("failed to update default translation",
+				"category_id", category.ID,
+				"error", err)
+		}
 	}
 
 	// Update category-subcategory relationships
@@ -288,7 +313,8 @@ func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategor
 		}
 	}
 
-	return category, nil
+	// Fetch the updated category to get the latest translations
+	return m.GetCategoryByID(ctx, id)
 }
 
 // GetCategoryByID retrieves a category by its ID

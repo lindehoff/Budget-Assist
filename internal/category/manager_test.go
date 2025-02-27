@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -66,15 +67,173 @@ func createTestManager() (*Manager, db.Store) {
 func createTestCategory(t *testing.T, store db.Store, name string, typeID uint) *db.Category {
 	t.Helper()
 	category := &db.Category{
-		Name:        name,
-		Description: "Test description",
-		TypeID:      typeID,
-		IsActive:    true,
+		TypeID:   typeID,
+		IsActive: true,
 	}
+
+	// Add English translation
+	translation := &db.Translation{
+		EntityType:   string(db.EntityTypeCategory),
+		LanguageCode: db.LangEN,
+		Name:         name,
+		Description:  "Test description",
+	}
+	category.Translations = append(category.Translations, *translation)
+
 	if err := store.CreateCategory(context.Background(), category); err != nil {
 		t.Fatalf("failed to create test category: %v", err)
 	}
 	return category
+}
+
+func TestManager_CreateCategory(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     CreateCategoryRequest
+		wantErr bool
+	}{
+		{
+			name: "valid request",
+			req: CreateCategoryRequest{
+				TypeID:             1,
+				InstanceIdentifier: "test-category",
+				Name:               "Test Category",
+				Description:        "Test Description",
+				Translations: map[string]TranslationData{
+					"sv": {
+						Name:        "Test Kategori",
+						Description: "Test Beskrivning",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing name",
+			req: CreateCategoryRequest{
+				TypeID:             1,
+				InstanceIdentifier: "test-category",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := ai.NewMockStore()
+			aiService := &mockAIService{}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			m := NewManager(store, aiService, logger)
+
+			got, err := m.CreateCategory(context.Background(), tt.req)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CreateCategory() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got == nil {
+				t.Error("CreateCategory() got = nil, want non-nil")
+			}
+			if !tt.wantErr {
+				var enTransl *db.Translation
+				for _, tr := range got.Translations {
+					if tr.LanguageCode == db.LangEN {
+						enTransl = &tr
+						break
+					}
+				}
+				if enTransl == nil || enTransl.Name != tt.req.Name {
+					t.Errorf("CreateCategory() got name = %v, want %v", enTransl.Name, tt.req.Name)
+				}
+				if len(tt.req.Translations) > 0 {
+					for lang, data := range tt.req.Translations {
+						var transl *db.Translation
+						for _, tr := range got.Translations {
+							if tr.LanguageCode == lang {
+								transl = &tr
+								break
+							}
+						}
+						if transl == nil || transl.Name != data.Name {
+							t.Errorf("CreateCategory() got translation name = %v, want %v", transl.Name, data.Name)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestManager_UpdateCategory(t *testing.T) {
+	store := ai.NewMockStore()
+	aiService := &mockAIService{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := NewManager(store, aiService, logger)
+
+	// Create a test category first
+	createReq := CreateCategoryRequest{
+		Name:        "Original",
+		Description: "Original Description",
+		TypeID:      1,
+	}
+	existingCategory, err := m.CreateCategory(context.Background(), createReq)
+	if err != nil {
+		t.Fatalf("failed to create test category: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		id      uint
+		req     UpdateCategoryRequest
+		wantErr bool
+	}{
+		{
+			name: "valid request",
+			id:   existingCategory.ID,
+			req: UpdateCategoryRequest{
+				Name:               "Updated Category",
+				Description:        "Updated Description",
+				InstanceIdentifier: "updated-category",
+				Translations: map[string]TranslationData{
+					"sv": {
+						Name:        "Uppdaterad Kategori",
+						Description: "Uppdaterad Beskrivning",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "category not found",
+			id:      999,
+			req:     UpdateCategoryRequest{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := m.UpdateCategory(context.Background(), tt.id, tt.req)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("UpdateCategory() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got == nil {
+				t.Error("UpdateCategory() got = nil, want non-nil")
+			}
+			if !tt.wantErr {
+				if got.GetName(db.LangEN) != tt.req.Name {
+					t.Errorf("UpdateCategory() got name = %v, want %v", got.GetName(db.LangEN), tt.req.Name)
+				}
+				if len(tt.req.Translations) > 0 {
+					for lang, data := range tt.req.Translations {
+						if got.GetName(lang) != data.Name {
+							t.Errorf("UpdateCategory() got translation name = %v, want %v", got.GetName(lang), data.Name)
+						}
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestCreateCategory(t *testing.T) {
