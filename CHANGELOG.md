@@ -1,5 +1,17 @@
 # Budget-Assist Changelog
 
+## <small>2.7.1 (2025-02-27)</small>
+
+* **deps:** remove unused test dependencies from go.mod ([](https://github.com/lindehoff/Budget-Assist/commit/daca48e5f35c256783e94e758e7ec8624aafe065))
+  - Remove testify and related dependencies
+- Clean up indirect dependencies no longer needed
+
+test(ai): add concurrency safety to mock store operations
+
+- Add mutex locks to all mock store methods
+- Implement proper synchronization for concurrent access
+- Update mock store to prevent data races in tests
+
 ## 2.7.0 (2025-02-26)
 
 * add data import commands and enhance processing configuration ([](https://github.com/lindehoff/Budget-Assist/commit/1525f6249a4616ecf6f6d32d567847eb5a47cb48))
