@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	db "github.com/lindehoff/Budget-Assist/internal/db"
 )
@@ -11,6 +12,8 @@ type MockStore struct {
 	prompts    map[string]*db.Prompt
 	categories map[uint]*db.Category
 	nextID     uint
+	mu         sync.Mutex
+	Categories []*db.Category
 }
 
 func NewMockStore() *MockStore {
@@ -22,6 +25,8 @@ func NewMockStore() *MockStore {
 }
 
 func (m *MockStore) CreateCategory(ctx context.Context, category *db.Category) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if category.Name == "" {
 		return db.DatabaseOperationError{
 			Operation: "create",
@@ -36,6 +41,8 @@ func (m *MockStore) CreateCategory(ctx context.Context, category *db.Category) e
 }
 
 func (m *MockStore) UpdateCategory(ctx context.Context, category *db.Category) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, exists := m.categories[category.ID]; !exists {
 		return db.ErrNotFound
 	}
@@ -44,6 +51,8 @@ func (m *MockStore) UpdateCategory(ctx context.Context, category *db.Category) e
 }
 
 func (m *MockStore) GetCategoryByID(ctx context.Context, id uint) (*db.Category, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	category, exists := m.categories[id]
 	if !exists {
 		return nil, db.ErrNotFound
@@ -52,6 +61,8 @@ func (m *MockStore) GetCategoryByID(ctx context.Context, id uint) (*db.Category,
 }
 
 func (m *MockStore) ListCategories(ctx context.Context, typeID *uint) ([]db.Category, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var categories []db.Category
 	for _, category := range m.categories {
 		if typeID == nil || category.TypeID == *typeID {
@@ -85,11 +96,15 @@ func (m *MockStore) GetPromptByType(ctx context.Context, promptType string) (*db
 }
 
 func (m *MockStore) UpdatePrompt(ctx context.Context, prompt *db.Prompt) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.prompts[prompt.Type] = prompt
 	return nil
 }
 
 func (m *MockStore) ListPrompts(ctx context.Context) ([]db.Prompt, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	prompts := make([]db.Prompt, 0, len(m.prompts))
 	for _, p := range m.prompts {
 		prompts = append(prompts, *p)
