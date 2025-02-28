@@ -10,6 +10,7 @@ import (
 
 	"github.com/lindehoff/Budget-Assist/internal/category"
 	"github.com/lindehoff/Budget-Assist/internal/db"
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
 
@@ -648,13 +649,19 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 		return printJSON(data)
 	case outputFormatTable:
 		table := newTable()
-		table.SetHeader([]string{"Type", "ID", "Name", "Description", "Active", "Tags"})
+		table.SetHeader([]string{"Name", "Description", "Active", "Tags"})
+		table.SetAutoWrapText(true)
+		table.SetColWidth(100)
+		table.SetColumnAlignment([]int{
+			tablewriter.ALIGN_LEFT,   // Name
+			tablewriter.ALIGN_LEFT,   // Description
+			tablewriter.ALIGN_CENTER, // Active
+			tablewriter.ALIGN_LEFT,   // Tags
+		})
 
 		for _, cat := range categories {
 			active := formatActive(cat.IsActive)
 			table.Append([]string{
-				"Category",
-				fmt.Sprintf("%d", cat.ID),
 				cat.Name,
 				cat.Description,
 				active,
@@ -674,9 +681,7 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 						tags = append(tags, tag.Name)
 					}
 					table.Append([]string{
-						"  ↳ Subcategory", // Indented with arrow to show hierarchy
-						fmt.Sprintf("%d", sub.ID),
-						sub.Name,
+						"  ↳ " + sub.Name, // Indented with arrow to show hierarchy
 						sub.Description,
 						active,
 						strings.Join(tags, ", "),
