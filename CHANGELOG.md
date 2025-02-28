@@ -1,5 +1,41 @@
 # Budget-Assist Changelog
 
+## 2.9.0 (2025-02-28)
+
+* **cmd:** enhance output with subcategories in category.go file 📊 ([](https://github.com/lindehoff/Budget-Assist/commit/f9040ec93b0be12e0521c9579788cde494ade883))
+  - Added logic to display subcategories under their parent category.
+- Indented subcategories with an arrow to show hierarchy.
+
+refactor(cmd/utils): update getStore function to use logger 🛠
+- Modified getStore to accept a logger parameter for better logging.
+- Updated database initialization to use the provided logger.
+
+chore(go.mod): remove unused dependencies 🗑️
+- Removed unnecessary dependencies from go.mod for cleaner project.
+
+feat(internal/category): add methods for creating categories and subcategories with translations 🌐
+- Implemented CreateCategoryWithTranslations and CreateSubcategoryWithTranslations methods.
+- These methods facilitate category and subcategory creation with translation support.
+
+refactor(internal/db/config): update Initialize function to accept logger parameter 🔧
+- Modified Initialize to configure GORM logger with a custom logger.
+- Improved logging configuration for better debugging.
+
+test(internal/db/db_test): enhance test database setup and cleanup procedures 🧪
+- Updated setupTestDB to use logger and improved cleanup logic.
+- Ensured temporary directory is removed after tests.
+* improve category and subcategory import logic 🛠️ ([](https://github.com/lindehoff/Budget-Assist/commit/b55b48c619d38b6106b20726ef70c7e656de2c17))
+  - Added checks to prevent duplicate category type imports.
+- Enhanced the import process to skip existing category types.
+- Improved translation handling for subcategories, ensuring
+  that the English name is prioritized and falls back to
+  the first available translation with a non-empty name.
+- Added error handling for missing required translation fields
+  during subcategory creation.
+
+This update enhances the robustness of the category import
+process and ensures data integrity. 🔍
+
 ## 2.8.0 (2025-02-27)
 
 * Merge pull request #23 from lindehoff/feat/refactor-category-management ([](https://github.com/lindehoff/Budget-Assist/commit/3a8bcf7e28c0b24b16e1ed6882ebcc42204373f9))
