@@ -693,14 +693,16 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 					continue
 				}
 				sub := catSub.Subcategory
-				active := formatActive(sub.IsActive)
-				table.Append([]string{
-					"  ↳ Subcategory", // Indented with arrow to show hierarchy
-					fmt.Sprintf("%d", sub.ID),
-					sub.GetName(db.LangEN),
-					sub.GetDescription(db.LangEN),
-					active,
-				})
+				if sub.IsActive {
+					active := formatActive(sub.IsActive)
+					table.Append([]string{
+						"  ↳ Subcategory", // Indented with arrow to show hierarchy
+						fmt.Sprintf("%d", sub.ID),
+						sub.GetName(db.LangEN),
+						sub.GetDescription(db.LangEN),
+						active,
+					})
+				}
 			}
 		}
 

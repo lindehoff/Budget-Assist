@@ -53,30 +53,41 @@ func ImportDefaultCategories(ctx context.Context, db *gorm.DB, importer Category
 		return err
 	}
 
+	// Check if categories already exist to avoid duplicate import
+	var count int64
+	if err := db.Model(&Category{}).Count(&count).Error; err == nil && count > 0 {
+		return nil
+	}
+
 	// Import category types first
 	for _, ct := range defaultData.CategoryTypes {
-		categoryType := &CategoryType{
-			Name:        ct.Name,
-			Description: ct.Description,
-			IsMultiple:  ct.IsMultiple,
-		}
-
-		if err := importer.CreateCategoryType(ctx, categoryType); err != nil {
-			return fmt.Errorf("failed to create category type: %w", err)
-		}
-
-		// Create translations for category type
-		for lang, trans := range ct.Translations {
-			translation := &Translation{
-				EntityID:     categoryType.ID,
-				EntityType:   string(EntityTypeCategoryType),
-				LanguageCode: lang,
-				Name:         trans.Name,
-				Description:  trans.Description,
+		var categoryType CategoryType
+		// Check if category type already exists
+		if err := db.Where("name = ?", ct.Name).First(&categoryType).Error; err != nil {
+			// Not found, so create new category type
+			categoryType = CategoryType{
+				Name:        ct.Name,
+				Description: ct.Description,
+				IsMultiple:  ct.IsMultiple,
 			}
-			if err := importer.CreateTranslation(ctx, translation); err != nil {
-				return fmt.Errorf("failed to create translation: %w", err)
+			if err := importer.CreateCategoryType(ctx, &categoryType); err != nil {
+				return fmt.Errorf("failed to create category type: %w", err)
 			}
+			// Create translations for category type
+			for lang, trans := range ct.Translations {
+				translation := &Translation{
+					EntityID:     categoryType.ID,
+					EntityType:   string(EntityTypeCategoryType),
+					LanguageCode: lang,
+					Name:         trans.Name,
+					Description:  trans.Description,
+				}
+				if err := importer.CreateTranslation(ctx, translation); err != nil {
+					return fmt.Errorf("failed to create translation: %w", err)
+				}
+			}
+		} else {
+			// Category type already exists, skip creation
 		}
 	}
 
@@ -84,10 +95,23 @@ func ImportDefaultCategories(ctx context.Context, db *gorm.DB, importer Category
 	subcategoryMap := make(map[string]uint) // name -> ID mapping
 	for _, cat := range defaultData.Categories {
 		for _, subcat := range cat.Subcategories {
-			// Get the English name for reference
-			enName := subcat.Translations[LangEN].Name
-			enDesc := subcat.Translations[LangEN].Description
-
+			// Use English translation if available, otherwise use first available translation with non-empty name
+			var enName, enDesc string
+			if trans, ok := subcat.Translations[LangEN]; ok && trans.Name != "" {
+				enName = trans.Name
+				enDesc = trans.Description
+			} else {
+				for _, trans := range subcat.Translations {
+					if trans.Name != "" {
+						enName = trans.Name
+						enDesc = trans.Description
+						break
+					}
+				}
+			}
+			if enName == "" {
+				return fmt.Errorf("failed to create subcategory: translation missing required name field")
+			}
 			subcatObj, err := importer.CreateSubcategory(ctx, enName, enDesc, true, subcat.Translations)
 			if err != nil {
 				return fmt.Errorf("failed to create subcategory %q: %w", enName, err)
