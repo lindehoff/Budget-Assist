@@ -57,9 +57,7 @@ func importCategoryTypes(db *gorm.DB, types []struct {
 		// Check if a category type with the same name already exists
 		var existingType CategoryType
 		if err := db.Where("name = ?", ct.Name).First(&existingType).Error; err == nil {
-			// If it exists, use its ID
-			typeMap[ct.Name] = existingType.ID
-			continue
+			return nil, fmt.Errorf("failed to create category type: duplicate name %s", ct.Name)
 		}
 
 		categoryType := CategoryType{
