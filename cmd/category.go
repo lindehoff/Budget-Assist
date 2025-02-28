@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/lindehoff/Budget-Assist/internal/category"
 	"github.com/lindehoff/Budget-Assist/internal/db"
@@ -134,32 +134,28 @@ var categoryAddCmd = &cobra.Command{
 Required:
 - Name
 - Description
+- Type
 - Type ID
 
 Optional:
-- Translations (will be prompted)
 - Instance identifier
 - Subcategories to link`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		description, _ := cmd.Flags().GetString("description")
-		typeID, _ := cmd.Flags().GetUint("type")
+		typeID, _ := cmd.Flags().GetUint("type-id")
+		typeName, _ := cmd.Flags().GetString("type")
 		instanceID, _ := cmd.Flags().GetString("instance-id")
-
-		translations := make(map[string]category.TranslationData)
-		// Always add English as default
-		translations[db.LangEN] = category.TranslationData{
-			Name:        name,
-			Description: description,
-		}
+		subcategories, _ := cmd.Flags().GetStringArray("subcategory")
 
 		req := category.CreateCategoryRequest{
 			Name:               name,
 			Description:        description,
 			TypeID:             typeID,
+			Type:               typeName,
 			InstanceIdentifier: instanceID,
-			Translations:       translations,
+			Subcategories:      subcategories,
 		}
 
 		cat, err := categoryManager.CreateCategory(cmd.Context(), req)
@@ -172,71 +168,41 @@ Optional:
 		}
 
 		fmt.Printf("Successfully created category %q with ID %d\n", cat.Name, cat.ID)
-
-		// Prompt for additional translations
-		fmt.Print("Do you want to add translations for this category? (y/n): ")
-		var response string
-		_, err = fmt.Scanln(&response)
-		if err != nil {
-			return &CategoryError{
-				Operation: "read_input",
-				Resource:  "translation_prompt",
-				Err:       err,
-			}
-		}
-
-		if response == "y" || response == "Y" {
-			if err := addTranslations(cmd.Context(), cat.ID, "category"); err != nil {
-				return err
-			}
-		}
-
 		return nil
 	},
 }
 
 // subcategoryAddCmd represents the subcategory add subcommand
 var subcategoryAddCmd = &cobra.Command{
-	Use:   "add-sub [name]",
+	Use:   "subcategory-add [name]",
 	Short: "Add a new subcategory",
-	Long: `Create a new subcategory that can be linked to multiple categories.
+	Long: `Create a new subcategory with the specified details.
 	
 Required:
 - Name
 - Description
-- At least one translation
 
 Optional:
 - Instance identifier
 - Categories to link
+- Tags to attach
 - System flag`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		description, _ := cmd.Flags().GetString("description")
 		instanceID, _ := cmd.Flags().GetString("instance-id")
-		isSystem, _ := cmd.Flags().GetBool("system")
 		categories, _ := cmd.Flags().GetStringArray("category")
-
-		translations := make(map[string]category.TranslationData)
-		// Always add English as default
-		translations[db.LangEN] = category.TranslationData{
-			Name:        name,
-			Description: description,
-		}
-
-		// Convert category names to IDs
-		var categoryIDs []uint
-		if len(categories) > 0 {
-			// TODO: Implement category lookup by name
-			return fmt.Errorf("category lookup by name not yet implemented")
-		}
+		tags, _ := cmd.Flags().GetStringArray("tag")
+		isSystem, _ := cmd.Flags().GetBool("system")
 
 		req := category.CreateSubcategoryRequest{
-			IsSystem:           isSystem,
+			Name:               name,
+			Description:        description,
 			InstanceIdentifier: instanceID,
-			Categories:         categoryIDs,
-			Translations:       translations,
+			Categories:         categories,
+			Tags:               tags,
+			IsSystem:           isSystem,
 		}
 
 		subcat, err := categoryManager.CreateSubcategory(cmd.Context(), req)
@@ -248,26 +214,7 @@ Optional:
 			}
 		}
 
-		fmt.Printf("Successfully created subcategory %q with ID %d\n", subcat.GetName(db.LangEN), subcat.ID)
-
-		// Prompt for additional translations
-		fmt.Print("Do you want to add translations for this subcategory? (y/n): ")
-		var response string
-		_, err = fmt.Scanln(&response)
-		if err != nil {
-			return &CategoryError{
-				Operation: "read_input",
-				Resource:  "translation_prompt",
-				Err:       err,
-			}
-		}
-
-		if response == "y" || response == "Y" {
-			if err := addTranslations(cmd.Context(), subcat.ID, "subcategory"); err != nil {
-				return err
-			}
-		}
-
+		fmt.Printf("Successfully created subcategory %q with ID %d\n", subcat.Name, subcat.ID)
 		return nil
 	},
 }
@@ -312,16 +259,53 @@ You can update:
 			}
 		}
 
-		// Convert subcategory names to IDs
-		var addSubIDs, removeSubIDs []uint
-		// TODO: Implement subcategory lookup by name
+		// Convert subcategory IDs to names
+		var addSubNames, removeSubNames []string
+		for _, idStr := range addSubs {
+			id, err := parseID(idStr)
+			if err != nil {
+				return &CategoryError{
+					Operation: "update",
+					Resource:  fmt.Sprintf("subcategory_id=%s", idStr),
+					Err:       err,
+				}
+			}
+			subcat, err := categoryManager.GetSubcategoryByID(cmd.Context(), id)
+			if err != nil {
+				return &CategoryError{
+					Operation: "update",
+					Resource:  fmt.Sprintf("subcategory_id=%d", id),
+					Err:       err,
+				}
+			}
+			addSubNames = append(addSubNames, subcat.Name)
+		}
+		for _, idStr := range removeSubs {
+			id, err := parseID(idStr)
+			if err != nil {
+				return &CategoryError{
+					Operation: "update",
+					Resource:  fmt.Sprintf("subcategory_id=%s", idStr),
+					Err:       err,
+				}
+			}
+			subcat, err := categoryManager.GetSubcategoryByID(cmd.Context(), id)
+			if err != nil {
+				return &CategoryError{
+					Operation: "update",
+					Resource:  fmt.Sprintf("subcategory_id=%d", id),
+					Err:       err,
+				}
+			}
+			removeSubNames = append(removeSubNames, subcat.Name)
+		}
 
 		req := category.UpdateCategoryRequest{
 			Name:                name,
 			Description:         description,
 			InstanceIdentifier:  instanceID,
-			AddSubcategories:    addSubIDs,
-			RemoveSubcategories: removeSubIDs,
+			AddSubcategories:    addSubNames,
+			RemoveSubcategories: removeSubNames,
 		}
 
 		if cmd.Flags().Changed("active") {
@@ -424,29 +408,23 @@ The file should contain:
 
 		var importData struct {
 			CategoryTypes []struct {
-				Name         string `json:"name"`
-				Description  string `json:"description"`
-				IsMultiple   bool   `json:"isMultiple"`
-				Translations map[string]struct {
-					Name        string `json:"name"`
-					Description string `json:"description"`
-				} `json:"translations"`
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				IsMultiple  bool   `json:"isMultiple"`
 			} `json:"categoryTypes"`
 			Categories []struct {
-				Name         string `json:"name"`
-				Description  string `json:"description"`
-				TypeID       uint   `json:"typeId"`
-				Translations map[string]struct {
-					Name        string `json:"name"`
-					Description string `json:"description"`
-				} `json:"translations"`
-				Subcategories []struct {
-					Translations map[string]struct {
-						Name        string `json:"name"`
-						Description string `json:"description"`
-					} `json:"translations"`
-				} `json:"subcategories"`
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				Type        string `json:"type"`
+				Instance    string `json:"instance,omitempty"`
 			} `json:"categories"`
+			Subcategories []struct {
+				Name        string   `json:"name"`
+				Description string   `json:"description"`
+				Tags        []string `json:"tags,omitempty"`
+				Categories  []string `json:"categories,omitempty"`
+				IsSystem    bool     `json:"isSystem,omitempty"`
+			} `json:"subcategories"`
 		}
 
 		if err := json.Unmarshal(data, &importData); err != nil {
@@ -460,21 +438,6 @@ The file should contain:
 		// First create category types
 		typeMap := make(map[string]uint) // name -> ID mapping
 		for _, ct := range importData.CategoryTypes {
-			// Create translations map
-			translations := make(map[string]category.TranslationData)
-			for lang, trans := range ct.Translations {
-				translations[lang] = category.TranslationData{
-					Name:        trans.Name,
-					Description: trans.Description,
-				}
-			}
-
-			// Add English translation from the name/description fields
-			translations[db.LangEN] = category.TranslationData{
-				Name:        ct.Name,
-				Description: ct.Description,
-			}
-
 			categoryType := &db.CategoryType{
 				Name:        ct.Name,
 				Description: ct.Description,
@@ -490,102 +453,103 @@ The file should contain:
 				}
 			}
 
-			// Create translations
-			for lang, trans := range translations {
-				translation := &db.Translation{
-					EntityID:     categoryType.ID,
-					EntityType:   string(db.EntityTypeCategoryType),
-					LanguageCode: lang,
-					Name:         trans.Name,
-					Description:  trans.Description,
-				}
-				if err := categoryManager.CreateTranslation(cmd.Context(), translation); err != nil {
-					return &CategoryError{
-						Operation: "create_translation",
-						Resource:  fmt.Sprintf("category_type_%d", categoryType.ID),
-						Err:       err,
-					}
-				}
-			}
-
 			typeMap[ct.Name] = categoryType.ID
-			fmt.Printf("Successfully imported category type %q\n", categoryType.GetTranslation(db.LangEN))
+			fmt.Printf("Successfully imported category type %q\n", categoryType.Name)
 		}
 
 		// Then create subcategories
 		subcategoryMap := make(map[string]uint) // name -> ID mapping
-		for _, cat := range importData.Categories {
-			for _, subcat := range cat.Subcategories {
-				translations := make(map[string]category.TranslationData)
-				for lang, trans := range subcat.Translations {
-					translations[lang] = category.TranslationData{
-						Name:        trans.Name,
-						Description: trans.Description,
-					}
-				}
-
-				// Get the English name for reference
-				enName := subcat.Translations[db.LangEN].Name
-
-				req := category.CreateSubcategoryRequest{
-					IsSystem:     true,
-					Translations: translations,
-				}
-
-				subcatObj, err := categoryManager.CreateSubcategory(cmd.Context(), req)
-				if err != nil {
-					return &CategoryError{
-						Operation: "import_subcategory",
-						Resource:  enName,
-						Err:       err,
-					}
-				}
-				subcategoryMap[enName] = subcatObj.ID
-				name := subcatObj.GetName(db.LangEN)
-				fmt.Printf("Successfully imported subcategory %q\n", name)
+		for _, subcat := range importData.Subcategories {
+			req := category.CreateSubcategoryRequest{
+				Name:        subcat.Name,
+				Description: subcat.Description,
+				IsSystem:    subcat.IsSystem,
+				Tags:        subcat.Tags,
 			}
+
+			subcatObj, err := categoryManager.CreateSubcategory(cmd.Context(), req)
+			if err != nil {
+				return &CategoryError{
+					Operation: "import_subcategory",
+					Resource:  subcat.Name,
+					Err:       err,
+				}
+			}
+			subcategoryMap[subcat.Name] = subcatObj.ID
+			fmt.Printf("Successfully imported subcategory %q\n", subcatObj.Name)
 		}
 
 		// Finally create categories and link subcategories
 		for _, cat := range importData.Categories {
-			translations := make(map[string]category.TranslationData)
-			for lang, trans := range cat.Translations {
-				translations[lang] = category.TranslationData{
-					Name:        trans.Name,
-					Description: trans.Description,
-				}
-			}
-
-			// Add English translation from the name/description fields
-			translations[db.LangEN] = category.TranslationData{
-				Name:        cat.Name,
-				Description: cat.Description,
-			}
-
-			var subcategoryIDs []uint
-			for _, subcat := range cat.Subcategories {
-				enName := subcat.Translations[db.LangEN].Name
-				if id, ok := subcategoryMap[enName]; ok {
-					subcategoryIDs = append(subcategoryIDs, id)
+			typeID, ok := typeMap[cat.Type]
+			if !ok {
+				return &CategoryError{
+					Operation: "import_category",
+					Resource:  cat.Name,
+					Err:       fmt.Errorf("category type %q not found", cat.Type),
 				}
 			}
 
 			req := category.CreateCategoryRequest{
-				TypeID:        cat.TypeID,
-				Translations:  translations,
-				Subcategories: subcategoryIDs,
+				Name:               cat.Name,
+				Description:        cat.Description,
+				Type:               cat.Type,
+				TypeID:             typeID,
+				InstanceIdentifier: cat.Instance,
 			}
 
 			mainCat, err := categoryManager.CreateCategory(cmd.Context(), req)
 			if err != nil {
 				return &CategoryError{
 					Operation: "import_category",
-					Resource:  translations[db.LangEN].Name,
+					Resource:  cat.Name,
 					Err:       err,
 				}
 			}
-			name := mainCat.GetName(db.LangEN)
-			fmt.Printf("Successfully imported category %q with %d subcategories\n", name, len(subcategoryIDs))
+			fmt.Printf("Successfully imported category %q\n", mainCat.Name)
+		}
+
+		// Link subcategories to categories after all entities are created
+		for _, subcat := range importData.Subcategories {
+			if len(subcat.Categories) == 0 {
+				continue
+			}
+
+			subcatID, ok := subcategoryMap[subcat.Name]
+			if !ok {
+				return &CategoryError{
+					Operation: "link_subcategory",
+					Resource:  subcat.Name,
+					Err:       fmt.Errorf("subcategory not found"),
+				}
+			}
+
+			for _, catName := range subcat.Categories {
+				// Get the store from the category manager
+				store := categoryManager.GetStore()
+				cat, err := store.GetCategoryByName(cmd.Context(), catName)
+				if err != nil {
+					return &CategoryError{
+						Operation: "link_subcategory",
+						Resource:  fmt.Sprintf("%s -> %s", subcat.Name, catName),
+						Err:       fmt.Errorf("category not found: %s", catName),
+					}
+				}
+
+				link := &db.CategorySubcategory{
+					CategoryID:    cat.ID,
+					SubcategoryID: subcatID,
+					IsActive:      true,
+				}
+				if err := store.CreateCategorySubcategory(cmd.Context(), link); err != nil {
+					return &CategoryError{
+						Operation: "link_subcategory",
+						Resource:  fmt.Sprintf("%s -> %s", subcat.Name, catName),
+						Err:       err,
+					}
+				}
+				fmt.Printf("Successfully linked subcategory %q to category %q\n", subcat.Name, cat.Name)
+			}
 		}
 
 		return nil
@@ -607,14 +571,17 @@ func init() {
 
 	// Add category flags
 	categoryAddCmd.Flags().StringP("description", "d", "", "Category description")
-	categoryAddCmd.Flags().UintP("type", "t", 1, "Category type ID")
-	categoryAddCmd.Flags().StringP("instance-id", "i", "", "Instance identifier")
+	categoryAddCmd.Flags().UintP("type-id", "i", 0, "Category type ID")
+	categoryAddCmd.Flags().StringP("type", "t", "", "Category type name")
+	categoryAddCmd.Flags().StringP("instance-id", "n", "", "Instance identifier")
+	categoryAddCmd.Flags().StringArrayP("subcategory", "s", nil, "Subcategories to link")
 
 	// Add subcategory flags
 	subcategoryAddCmd.Flags().StringP("description", "d", "", "Subcategory description")
 	subcategoryAddCmd.Flags().StringP("instance-id", "i", "", "Instance identifier")
 	subcategoryAddCmd.Flags().BoolP("system", "s", false, "Mark as system subcategory")
 	subcategoryAddCmd.Flags().StringArrayP("category", "c", nil, "Categories to link to")
+	subcategoryAddCmd.Flags().StringArrayP("tag", "t", nil, "Tags to attach")
 
 	// Update flags
 	categoryUpdateCmd.Flags().StringP("name", "n", "", "New category name")
@@ -630,6 +597,12 @@ func init() {
 	// Mark required flags
 	if err := categoryAddCmd.MarkFlagRequired("description"); err != nil {
 		fmt.Printf("failed to mark description flag as required: %v\n", err)
+	}
+	if err := categoryAddCmd.MarkFlagRequired("type"); err != nil {
+		fmt.Printf("failed to mark type flag as required: %v\n", err)
+	}
+	if err := categoryAddCmd.MarkFlagRequired("type-id"); err != nil {
+		fmt.Printf("failed to mark type-id flag as required: %v\n", err)
 	}
 	if err := subcategoryAddCmd.MarkFlagRequired("description"); err != nil {
 		fmt.Printf("failed to mark description flag as required: %v\n", err)
@@ -648,9 +621,9 @@ func outputTable(categories []db.Category) error {
 		active := formatActive(cat.IsActive)
 		table.Append([]string{
 			fmt.Sprintf("%d", cat.ID),
-			cat.GetName(db.LangEN),
-			cat.GetDescription(db.LangEN),
-			fmt.Sprintf("%d", cat.TypeID),
+			cat.Name,
+			cat.Description,
+			cat.Type,
 			active,
 		})
 	}
@@ -675,16 +648,17 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 		return printJSON(data)
 	case outputFormatTable:
 		table := newTable()
-		table.SetHeader([]string{"Type", "ID", "Name", "Description", "Active"})
+		table.SetHeader([]string{"Type", "ID", "Name", "Description", "Active", "Tags"})
 
 		for _, cat := range categories {
 			active := formatActive(cat.IsActive)
 			table.Append([]string{
 				"Category",
 				fmt.Sprintf("%d", cat.ID),
-				cat.GetName(db.LangEN),
-				cat.GetDescription(db.LangEN),
+				cat.Name,
+				cat.Description,
 				active,
+				"",
 			})
 
 			// Add subcategories under their parent category
@@ -695,12 +669,17 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 				sub := catSub.Subcategory
 				if sub.IsActive {
 					active := formatActive(sub.IsActive)
+					var tags []string
+					for _, tag := range sub.Tags {
+						tags = append(tags, tag.Name)
+					}
 					table.Append([]string{
 						"  ↳ Subcategory", // Indented with arrow to show hierarchy
 						fmt.Sprintf("%d", sub.ID),
-						sub.GetName(db.LangEN),
-						sub.GetDescription(db.LangEN),
+						sub.Name,
+						sub.Description,
 						active,
+						strings.Join(tags, ", "),
 					})
 				}
 			}
@@ -713,55 +692,11 @@ func outputWithSubcategories(categories []db.Category, subcategories []db.Subcat
 	}
 }
 
-func addTranslations(ctx context.Context, entityID uint, entityType string) error {
-	fmt.Println("Adding translations (enter empty language code to finish):")
-	for {
-		var langCode, name, description string
-
-		fmt.Print("Language code (e.g., sv): ")
-		_, err := fmt.Scanln(&langCode)
-		if err != nil || langCode == "" {
-			break
-		}
-
-		fmt.Print("Translated name: ")
-		_, err = fmt.Scanln(&name)
-		if err != nil {
-			return &CategoryError{
-				Operation: "read_input",
-				Resource:  "translation_name",
-				Err:       err,
-			}
-		}
-
-		fmt.Print("Translated description: ")
-		_, err = fmt.Scanln(&description)
-		if err != nil {
-			return &CategoryError{
-				Operation: "read_input",
-				Resource:  "translation_description",
-				Err:       err,
-			}
-		}
-
-		translation := &db.Translation{
-			EntityID:     entityID,
-			EntityType:   entityType,
-			LanguageCode: langCode,
-			Name:         name,
-			Description:  description,
-		}
-
-		if err := categoryManager.CreateTranslation(ctx, translation); err != nil {
-			return &CategoryError{
-				Operation: "create_translation",
-				Resource:  fmt.Sprintf("%s_%d", entityType, entityID),
-				Err:       err,
-			}
-		}
+func formatActive(isActive bool) string {
+	if isActive {
+		return statusActive
 	}
-
-	return nil
+	return statusInactive
 }
 
 func parseID(s string) (uint, error) {
@@ -770,11 +705,4 @@ func parseID(s string) (uint, error) {
 		return 0, err
 	}
 	return uint(id), nil
-}
-
-func formatActive(isActive bool) string {
-	if isActive {
-		return statusActive
-	}
-	return statusInactive
 }

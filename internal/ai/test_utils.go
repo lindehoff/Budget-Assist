@@ -27,11 +27,11 @@ func NewMockStore() *MockStore {
 func (m *MockStore) CreateCategory(ctx context.Context, category *db.Category) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if category.Name == "" && len(category.Translations) == 0 {
+	if category.Name == "" {
 		return db.DatabaseOperationError{
 			Operation: "create",
 			Entity:    "category",
-			Err:       fmt.Errorf("either name or at least one translation is required"),
+			Err:       fmt.Errorf("name is required"),
 		}
 	}
 	category.ID = m.nextID
@@ -77,28 +77,6 @@ func (m *MockStore) GetCategoryTypeByID(ctx context.Context, id uint) (*db.Categ
 }
 
 func (m *MockStore) CreateTranslation(ctx context.Context, translation *db.Translation) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if translation.EntityType == string(db.EntityTypeCategory) {
-		category, exists := m.categories[translation.EntityID]
-		if !exists {
-			return db.ErrNotFound
-		}
-		// Update or add translation
-		found := false
-		for i, t := range category.Translations {
-			if t.LanguageCode == translation.LanguageCode {
-				category.Translations[i] = *translation
-				found = true
-				break
-			}
-		}
-		if !found {
-			category.Translations = append(category.Translations, *translation)
-		}
-		m.categories[translation.EntityID] = category
-	}
 	return nil
 }
 
@@ -244,5 +222,40 @@ func (m *MockStore) UpdateCategoryType(ctx context.Context, categoryType *db.Cat
 
 // ListCategoryTypes implements db.Store
 func (m *MockStore) ListCategoryTypes(ctx context.Context) ([]db.CategoryType, error) {
+	return nil, nil
+}
+
+// CreateTag implements db.Store
+func (m *MockStore) CreateTag(ctx context.Context, tag *db.Tag) error {
+	return nil
+}
+
+// GetTagByName implements db.Store
+func (m *MockStore) GetTagByName(ctx context.Context, name string) (*db.Tag, error) {
+	return nil, nil
+}
+
+// LinkSubcategoryTag implements db.Store
+func (m *MockStore) LinkSubcategoryTag(ctx context.Context, subcategoryID uint, tagID uint) error {
+	return nil
+}
+
+// UnlinkSubcategoryTag implements db.Store
+func (m *MockStore) UnlinkSubcategoryTag(ctx context.Context, subcategoryID uint, tagID uint) error {
+	return nil
+}
+
+// GetCategoryByName implements db.Store
+func (m *MockStore) GetCategoryByName(ctx context.Context, name string) (*db.Category, error) {
+	return nil, nil
+}
+
+// GetSubcategoryByName implements db.Store
+func (m *MockStore) GetSubcategoryByName(ctx context.Context, name string) (*db.Subcategory, error) {
+	return nil, nil
+}
+
+// GetCategoryTypeByName implements db.Store
+func (m *MockStore) GetCategoryTypeByName(ctx context.Context, name string) (*db.CategoryType, error) {
 	return nil, nil
 }

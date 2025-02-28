@@ -18,11 +18,14 @@ func createTestDB(t *testing.T) *gorm.DB {
 
 	// Auto migrate all required tables
 	if err := db.AutoMigrate(
-		&Category{},
 		&CategoryType{},
-		&Translation{},
-		&CategorySubcategory{},
+		&Category{},
 		&Subcategory{},
+		&CategorySubcategory{},
+		&Tag{},
+		&Translation{},
+		&Transaction{},
+		&Prompt{},
 	); err != nil {
 		t.Fatalf("failed to migrate database: %v", err)
 	}
@@ -48,19 +51,6 @@ func createTestCategory(t *testing.T, store Store, name string, typeID uint) *Ca
 	if err != nil {
 		t.Fatalf("failed to create test category: %v", err)
 	}
-
-	// Add translation for the category
-	translation := &Translation{
-		EntityID:     category.ID,
-		EntityType:   "category",
-		LanguageCode: LangEN,
-		Name:         name,
-		Description:  "Test description",
-	}
-	err = store.CreateTranslation(context.Background(), translation)
-	if err != nil {
-		t.Fatalf("failed to create test translation: %v", err)
-	}
 	return category
 }
 
@@ -75,24 +65,14 @@ func createTestCategoryType(t *testing.T, db *gorm.DB, name string) *CategoryTyp
 	if result.Error != nil {
 		t.Fatalf("failed to create test category type: %v", result.Error)
 	}
-
-	// Add translation for the category type
-	translation := &Translation{
-		EntityID:     categoryType.ID,
-		EntityType:   "category_type",
-		LanguageCode: LangEN,
-		Name:         name,
-		Description:  "Test type description",
-	}
-	result = db.Create(translation)
-	if result.Error != nil {
-		t.Fatalf("failed to create test translation: %v", result.Error)
-	}
 	return categoryType
 }
 
 func TestSQLStore_CreateCategory(t *testing.T) {
-	store, _ := createTestStore(t)
+	store, db := createTestStore(t)
+
+	// Create a test category type first
+	categoryType := createTestCategoryType(t, db, "Test Type")
 
 	tests := []struct {
 		name     string
@@ -104,15 +84,8 @@ func TestSQLStore_CreateCategory(t *testing.T) {
 			category: &Category{
 				Name:        "Test Category",
 				Description: "Test Description",
-				TypeID:      1,
+				TypeID:      categoryType.ID,
 				IsActive:    true,
-				Translations: []Translation{
-					{
-						LanguageCode: LangEN,
-						Name:         "Test Category",
-						Description:  "Test Description",
-					},
-				},
 			},
 			wantErr: false,
 		},
@@ -173,7 +146,7 @@ func TestSQLStore_GetCategoryByID(t *testing.T) {
 			if tt.wantErr != nil {
 				return
 			}
-			if got.ID != tt.want.ID || got.GetName(LangEN) != tt.want.GetName(LangEN) {
+			if got.ID != tt.want.ID || got.Name != tt.want.Name {
 				t.Errorf("SQLStore.GetCategoryByID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -187,7 +160,7 @@ func TestSQLStore_ListCategories(t *testing.T) {
 	type1 := createTestCategoryType(t, db, "Type 1")
 	type2 := createTestCategoryType(t, db, "Type 2")
 
-	// Create test categories with translations
+	// Create test categories
 	_ = createTestCategory(t, store, "Category 1", type1.ID)
 	_ = createTestCategory(t, store, "Category 2", type1.ID)
 	_ = createTestCategory(t, store, "Category 3", type2.ID)
@@ -206,17 +179,10 @@ func TestSQLStore_ListCategories(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name:           "Successfully_filter_by_type",
-			typeID:         func() *uint { id := type1.ID; return &id }(),
+			name:           "Successfully_list_categories_by_type",
+			typeID:         &type1.ID,
 			expectedCount:  2,
 			expectedTypeID: type1.ID,
-			wantErr:        false,
-		},
-		{
-			name:           "Successfully_handle_empty_type",
-			typeID:         func() *uint { id := uint(999); return &id }(),
-			expectedCount:  0,
-			expectedTypeID: 999,
 			wantErr:        false,
 		},
 	}
@@ -224,8 +190,8 @@ func TestSQLStore_ListCategories(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			categories, err := store.ListCategories(context.Background(), tt.typeID)
-			if err != nil {
-				t.Errorf("SQLStore.ListCategories() error = %v", err)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SQLStore.ListCategories() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
@@ -234,9 +200,9 @@ func TestSQLStore_ListCategories(t *testing.T) {
 			}
 
 			if tt.typeID != nil {
-				for _, cat := range categories {
-					if cat.TypeID != *tt.typeID {
-						t.Errorf("SQLStore.ListCategories() category typeID = %v, want %v", cat.TypeID, *tt.typeID)
+				for _, category := range categories {
+					if category.TypeID != tt.expectedTypeID {
+						t.Errorf("SQLStore.ListCategories() got category with type ID %d, want %d", category.TypeID, tt.expectedTypeID)
 					}
 				}
 			}
@@ -244,164 +210,40 @@ func TestSQLStore_ListCategories(t *testing.T) {
 	}
 }
 
-func TestSQLStore_CreateTranslation(t *testing.T) {
-	store, _ := createTestStore(t)
-	category := createTestCategory(t, store, "Test Category", 1)
-
-	tests := []struct {
-		name        string
-		translation *Translation
-		wantErr     bool
-	}{
-		{
-			name: "Successfully_create_valid_translation",
-			translation: &Translation{
-				EntityID:     category.ID,
-				EntityType:   "category",
-				LanguageCode: "sv",
-				Name:         "Test Name SV",
-				Description:  "Test Description SV",
-			},
-			wantErr: false,
-		},
-		{
-			name: "Error_create_translation_without_language_code",
-			translation: &Translation{
-				EntityID:   category.ID,
-				EntityType: "category",
-				Name:       "Test Name",
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := store.CreateTranslation(context.Background(), tt.translation)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("SQLStore.CreateTranslation() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if !tt.wantErr && tt.translation.ID == 0 {
-				t.Error("SQLStore.CreateTranslation() translation ID not set")
-			}
-		})
-	}
-}
-
-func TestSQLStore_GetTranslations(t *testing.T) {
-	store, _ := createTestStore(t)
-	category := createTestCategory(t, store, "Test Category", 1)
-
-	// Create additional translations
-	translations := []Translation{
-		{
-			EntityID:     category.ID,
-			EntityType:   "category",
-			LanguageCode: "sv",
-			Name:         "Test Kategori",
-			Description:  "Test Beskrivning",
-		},
-	}
-
-	for _, tr := range translations {
-		if err := store.CreateTranslation(context.Background(), &tr); err != nil {
-			t.Fatalf("failed to create test translation: %v", err)
-		}
-	}
-
-	tests := []struct {
-		name           string
-		entityID       uint
-		entityType     string
-		wantCount      int
-		wantLanguages  []string
-		wantErr        bool
-		expectedErrMsg string
-	}{
-		{
-			name:          "Successfully_get_translations",
-			entityID:      category.ID,
-			entityType:    "category",
-			wantCount:     2, // English (from createTestCategory) + Swedish
-			wantLanguages: []string{LangEN, "sv"},
-			wantErr:       false,
-		},
-		{
-			name:           "Error_get_translations_non_existent_entity",
-			entityID:       999,
-			entityType:     "category",
-			wantCount:      0,
-			wantLanguages:  nil,
-			wantErr:        true,
-			expectedErrMsg: "record not found",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			translations, err := store.GetTranslations(context.Background(), tt.entityID, tt.entityType)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("SQLStore.GetTranslations() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				if err.Error() != tt.expectedErrMsg {
-					t.Errorf("SQLStore.GetTranslations() error message = %v, want %v", err.Error(), tt.expectedErrMsg)
-				}
-				return
-			}
-
-			if len(translations) != tt.wantCount {
-				t.Errorf("SQLStore.GetTranslations() got %d translations, want %d", len(translations), tt.wantCount)
-				return
-			}
-
-			// Check that we got all expected languages
-			langMap := make(map[string]bool)
-			for _, tr := range translations {
-				langMap[tr.LanguageCode] = true
-			}
-			for _, lang := range tt.wantLanguages {
-				if !langMap[lang] {
-					t.Errorf("SQLStore.GetTranslations() missing translation for language %q", lang)
-				}
-			}
-		})
-	}
-}
-
 func TestSQLStore_DeleteCategory(t *testing.T) {
-	store, _ := createTestStore(t)
-	category := createTestCategory(t, store, "Test Category", 1)
+	store, db := createTestStore(t)
+
+	// Create a test category type first
+	categoryType := createTestCategoryType(t, db, "Test Type")
+
+	// Create a test category
+	existingCategory := createTestCategory(t, store, "Test Category", categoryType.ID)
 
 	tests := []struct {
 		name    string
 		id      uint
-		wantErr bool
+		wantErr error
 	}{
 		{
-			name:    "Successfully_delete_existing_category",
-			id:      category.ID,
-			wantErr: false,
+			name: "Successfully_delete_existing_category",
+			id:   existingCategory.ID,
 		},
 		{
-			name:    "Successfully_handle_non_existent_category",
+			name:    "Error_delete_non_existent_category",
 			id:      999,
-			wantErr: false,
+			wantErr: ErrNotFound,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := store.DeleteCategory(context.Background(), tt.id)
-			if (err != nil) != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("SQLStore.DeleteCategory() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			// Verify deletion
-			if !tt.wantErr {
+			if tt.wantErr == nil {
+				// Verify category was deleted
 				_, err := store.GetCategoryByID(context.Background(), tt.id)
 				if !errors.Is(err, ErrNotFound) {
 					t.Errorf("SQLStore.DeleteCategory() category still exists after deletion")

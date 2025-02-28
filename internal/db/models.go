@@ -35,25 +35,13 @@ type Translation struct {
 
 // CategoryType represents different types of categories (e.g., VEHICLE, PROPERTY)
 type CategoryType struct {
-	ID            uint          `gorm:"primarykey"`
-	CreatedAt     time.Time     `gorm:"not null"`
-	UpdatedAt     time.Time     `gorm:"not null"`
-	Name          string        `gorm:"not null;unique;size:100"`
-	Description   string        `gorm:"size:500"`
-	IsMultiple    bool          `gorm:"not null"`
-	Categories    []Category    `gorm:"foreignKey:TypeID"`
-	Subcategories []Subcategory `gorm:"foreignKey:CategoryTypeID"`
-	Translations  []Translation `gorm:"polymorphic:Entity;polymorphicValue:category_type"`
-}
-
-// GetTranslation returns the translated name for the specified language code
-func (ct *CategoryType) GetTranslation(langCode string) string {
-	for _, t := range ct.Translations {
-		if t.LanguageCode == langCode {
-			return t.Name
-		}
-	}
-	return ct.Name // Fallback to English name
+	ID          uint       `gorm:"primarykey"`
+	CreatedAt   time.Time  `gorm:"not null"`
+	UpdatedAt   time.Time  `gorm:"not null"`
+	Name        string     `gorm:"not null;unique;size:100"`
+	Description string     `gorm:"size:500"`
+	IsMultiple  bool       `gorm:"not null"`
+	Categories  []Category `gorm:"foreignKey:TypeID"`
 }
 
 // Category represents a main category
@@ -62,126 +50,29 @@ type Category struct {
 	Name               string `gorm:"not null;size:100"`
 	Description        string `gorm:"size:500"`
 	TypeID             uint   `gorm:"not null"`
+	Type               string `gorm:"not null;size:100"` // Reference to CategoryType.Name
 	InstanceIdentifier string
 	IsActive           bool `gorm:"default:true"`
 	Subcategories      []CategorySubcategory
-	Translations       []Translation `gorm:"polymorphic:Entity;polymorphicValue:category"`
-}
-
-// BeforeCreate validates the category before creation
-func (c *Category) BeforeCreate(tx *gorm.DB) error {
-	if c.Name == "" && len(c.Translations) == 0 {
-		return fmt.Errorf("either name or at least one translation is required")
-	}
-	if c.TypeID == 0 {
-		return fmt.Errorf("type ID is required")
-	}
-	return nil
-}
-
-// GetName returns the translated name for the given language code
-func (c *Category) GetName(langCode string) string {
-	if langCode == LangEN && c.Name != "" {
-		return c.Name
-	}
-	for _, t := range c.Translations {
-		if t.LanguageCode == langCode {
-			return t.Name
-		}
-	}
-	// Return English name as fallback
-	if c.Name != "" {
-		return c.Name
-	}
-	// Return first available translation if no English name
-	if len(c.Translations) > 0 {
-		return c.Translations[0].Name
-	}
-	return ""
-}
-
-// GetDescription returns the translated description for the given language code
-func (c *Category) GetDescription(langCode string) string {
-	if langCode == LangEN && c.Description != "" {
-		return c.Description
-	}
-	for _, t := range c.Translations {
-		if t.LanguageCode == langCode {
-			return t.Description
-		}
-	}
-	// Return English description as fallback
-	if c.Description != "" {
-		return c.Description
-	}
-	// Return first available translation if no English description
-	if len(c.Translations) > 0 {
-		return c.Translations[0].Description
-	}
-	return ""
 }
 
 // Subcategory represents a subcategory that can be linked to multiple categories
 type Subcategory struct {
 	gorm.Model
-	Name               string `gorm:"not null;size:100"`
-	Description        string `gorm:"size:500"`
-	CategoryTypeID     uint
-	InstanceIdentifier string
-	IsActive           bool `gorm:"default:true"`
-	IsSystem           bool `gorm:"default:false"`
-	Categories         []CategorySubcategory
-	Translations       []Translation `gorm:"polymorphic:Entity"`
+	Name        string `gorm:"not null;size:100"`
+	Description string `gorm:"size:500"`
+	IsActive    bool   `gorm:"default:true"`
+	IsSystem    bool   `gorm:"default:false"`
+	Tags        []Tag  `gorm:"many2many:subcategory_tags"`
+	Categories  []CategorySubcategory
 }
 
-// GetName returns the translated name for the given language code
-func (s *Subcategory) GetName(langCode string) string {
-	if langCode == LangEN && s.Name != "" {
-		return s.Name
-	}
-	for _, t := range s.Translations {
-		if t.LanguageCode == langCode {
-			return t.Name
-		}
-	}
-	// Return English name as fallback
-	if s.Name != "" {
-		return s.Name
-	}
-	// Return first available translation if no English name
-	if len(s.Translations) > 0 {
-		return s.Translations[0].Name
-	}
-	return ""
-}
-
-// GetDescription returns the translated description for the given language code
-func (s *Subcategory) GetDescription(langCode string) string {
-	if langCode == LangEN && s.Description != "" {
-		return s.Description
-	}
-	for _, t := range s.Translations {
-		if t.LanguageCode == langCode {
-			return t.Description
-		}
-	}
-	// Return English description as fallback
-	if s.Description != "" {
-		return s.Description
-	}
-	// Return first available translation if no English description
-	if len(s.Translations) > 0 {
-		return s.Translations[0].Description
-	}
-	return ""
-}
-
-// BeforeCreate validates the subcategory before creation
-func (s *Subcategory) BeforeCreate(tx *gorm.DB) error {
-	if s.Name == "" && len(s.Translations) == 0 {
-		return fmt.Errorf("either name or at least one translation is required")
-	}
-	return nil
+// Tag represents a label that can be attached to subcategories
+type Tag struct {
+	gorm.Model
+	Name          string `gorm:"uniqueIndex;not null"`
+	Description   string
+	Subcategories []Subcategory `gorm:"many2many:subcategory_tags"`
 }
 
 // CategorySubcategory represents the many-to-many relationship between categories and subcategories
@@ -225,14 +116,6 @@ func (t *Transaction) BeforeCreate(tx *gorm.DB) error {
 	default:
 		return fmt.Errorf("invalid currency: %s", t.Currency)
 	}
-}
-
-// Tag represents a label that can be attached to transactions
-type Tag struct {
-	gorm.Model
-	Name         string `gorm:"uniqueIndex;not null"`
-	Description  string
-	Transactions []Transaction `gorm:"many2many:transaction_tags;"`
 }
 
 // Budget represents a budget plan for a specific category
