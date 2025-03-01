@@ -45,6 +45,21 @@ type DefaultCategoriesData struct {
 	} `json:"categories"`
 }
 
+// DefaultPromptsData represents the structure of the prompts.json file
+type DefaultPromptsData struct {
+	Prompts []struct {
+		Type         string `json:"type"`
+		Name         string `json:"name"`
+		Translations map[string]struct {
+			Name         string `json:"name"`
+			SystemPrompt string `json:"system_prompt"`
+			UserPrompt   string `json:"user_prompt"`
+		} `json:"translations"`
+		Version  string `json:"version"`
+		IsActive bool   `json:"is_active"`
+	} `json:"prompts"`
+}
+
 // importCategoryTypes imports category types and returns a map of type names to IDs
 func importCategoryTypes(db *gorm.DB, types []struct {
 	Name         string                     `json:"name"`
@@ -203,7 +218,19 @@ func importCategories(db *gorm.DB, categories []struct {
 }
 
 // ImportDefaultCategories imports the default categories from the categories.json file
+// only if no categories exist in the database
 func ImportDefaultCategories(ctx context.Context, db *gorm.DB) error {
+	// Check if any category types already exist
+	var count int64
+	if err := db.Model(&CategoryType{}).Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to check existing categories: %w", err)
+	}
+
+	// If categories already exist, skip import
+	if count > 0 {
+		return nil
+	}
+
 	// Read and parse the categories.json file
 	defaultData, err := readDefaultCategoriesFile()
 	if err != nil {
@@ -266,7 +293,82 @@ func readDefaultCategoriesFile() (*DefaultCategoriesData, error) {
 }
 
 // ImportDefaultPrompts imports the default prompts from the prompts.json file
+// only if no prompts exist in the database
 func ImportDefaultPrompts(ctx context.Context, db *gorm.DB) error {
-	// TODO: Implement default prompts import when prompts.json is ready
+	// Check if any prompts already exist
+	var count int64
+	if err := db.Model(&Prompt{}).Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to check existing prompts: %w", err)
+	}
+
+	// If prompts already exist, skip import
+	if count > 0 {
+		return nil
+	}
+
+	// Read and parse the prompts.json file
+	defaultData, err := readDefaultPromptsFile()
+	if err != nil {
+		return err
+	}
+
+	// Import prompts
+	for _, p := range defaultData.Prompts {
+		// Use English translation as default
+		enTrans := p.Translations["en"]
+		if enTrans.Name == "" {
+			// If no English translation, use the default name
+			enTrans.Name = p.Name
+		}
+
+		prompt := Prompt{
+			Type:         p.Type,
+			Name:         enTrans.Name,
+			Description:  "", // No description in the current format
+			SystemPrompt: enTrans.SystemPrompt,
+			UserPrompt:   enTrans.UserPrompt,
+			Version:      p.Version,
+			IsActive:     p.IsActive,
+		}
+		if err := db.Create(&prompt).Error; err != nil {
+			return fmt.Errorf("failed to create prompt %s: %w", p.Name, err)
+		}
+	}
+
 	return nil
+}
+
+func readDefaultPromptsFile() (*DefaultPromptsData, error) {
+	// Try to find the prompts.json file in different locations
+	locations := []string{
+		"defaults/prompts.json", // Check in the defaults directory first
+		"prompts.json",          // Then check in the current directory
+	}
+
+	var data []byte
+	var lastErr error
+	fileFound := false
+	for _, loc := range locations {
+		data, lastErr = os.ReadFile(loc)
+		if lastErr == nil {
+			fileFound = true
+			break
+		}
+	}
+
+	if !fileFound {
+		return nil, fmt.Errorf("failed to read prompts file: no file found in any location")
+	}
+
+	var promptsData DefaultPromptsData
+	if err := json.Unmarshal(data, &promptsData); err != nil {
+		return nil, fmt.Errorf("failed to parse prompts file: %w", err)
+	}
+
+	// Validate the data
+	if len(promptsData.Prompts) == 0 {
+		return nil, fmt.Errorf("failed to read prompts file: no prompts found")
+	}
+
+	return &promptsData, nil
 }
