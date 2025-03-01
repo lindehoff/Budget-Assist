@@ -9,27 +9,19 @@ import (
 	"gorm.io/gorm"
 )
 
-// TranslationData represents the data needed for a translation
-type TranslationData struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
 // CategoryImporter defines the interface for importing categories
 type CategoryImporter interface {
-	CreateCategory(ctx context.Context, name, description string, typeID uint, translations map[string]TranslationData, subcategoryIDs []uint) (*Category, error)
-	CreateSubcategory(ctx context.Context, name, description string, isSystem bool, translations map[string]TranslationData) (*Subcategory, error)
+	CreateCategory(ctx context.Context, name, description string, typeID uint, subcategoryIDs []uint) (*Category, error)
+	CreateSubcategory(ctx context.Context, name, description string, isSystem bool) (*Subcategory, error)
 	CreateCategoryType(ctx context.Context, categoryType *CategoryType) error
-	CreateTranslation(ctx context.Context, translation *Translation) error
 }
 
 // DefaultCategoriesData represents the structure of the categories.json file
 type DefaultCategoriesData struct {
 	CategoryTypes []struct {
-		Name         string                     `json:"name"`
-		Description  string                     `json:"description"`
-		IsMultiple   bool                       `json:"isMultiple"`
-		Translations map[string]TranslationData `json:"translations,omitempty"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		IsMultiple  bool   `json:"isMultiple"`
 	} `json:"categoryTypes"`
 	Subcategories []struct {
 		Name        string   `json:"name"`
@@ -37,11 +29,10 @@ type DefaultCategoriesData struct {
 		Tags        []string `json:"tags"`
 	} `json:"subcategories"`
 	Categories []struct {
-		Name          string                     `json:"name"`
-		Description   string                     `json:"description"`
-		Type          string                     `json:"type"`
-		Translations  map[string]TranslationData `json:"translations,omitempty"`
-		Subcategories []string                   `json:"subcategories"`
+		Name          string   `json:"name"`
+		Description   string   `json:"description"`
+		Type          string   `json:"type"`
+		Subcategories []string `json:"subcategories"`
 	} `json:"categories"`
 }
 
@@ -50,22 +41,19 @@ type DefaultPromptsData struct {
 	Prompts []struct {
 		Type         string `json:"type"`
 		Name         string `json:"name"`
-		Translations map[string]struct {
-			Name         string `json:"name"`
-			SystemPrompt string `json:"system_prompt"`
-			UserPrompt   string `json:"user_prompt"`
-		} `json:"translations"`
-		Version  string `json:"version"`
-		IsActive bool   `json:"is_active"`
+		Description  string `json:"description"`
+		SystemPrompt string `json:"system_prompt"`
+		UserPrompt   string `json:"user_prompt"`
+		Version      string `json:"version"`
+		IsActive     bool   `json:"is_active"`
 	} `json:"prompts"`
 }
 
 // importCategoryTypes imports category types and returns a map of type names to IDs
 func importCategoryTypes(db *gorm.DB, types []struct {
-	Name         string                     `json:"name"`
-	Description  string                     `json:"description"`
-	IsMultiple   bool                       `json:"isMultiple"`
-	Translations map[string]TranslationData `json:"translations,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsMultiple  bool   `json:"isMultiple"`
 }) (map[string]uint, error) {
 	typeMap := make(map[string]uint)
 	for _, ct := range types {
@@ -153,11 +141,10 @@ func importSubcategories(db *gorm.DB, subcategories []struct {
 
 // importCategories imports categories and their subcategories
 func importCategories(db *gorm.DB, categories []struct {
-	Name          string                     `json:"name"`
-	Description   string                     `json:"description"`
-	Type          string                     `json:"type"`
-	Translations  map[string]TranslationData `json:"translations,omitempty"`
-	Subcategories []string                   `json:"subcategories"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	Type          string   `json:"type"`
+	Subcategories []string `json:"subcategories"`
 }, typeMap map[string]uint, subcategoryMap map[string]uint) error {
 	for _, cat := range categories {
 		// Get the category type ID from the map
@@ -177,6 +164,7 @@ func importCategories(db *gorm.DB, categories []struct {
 			Name:        cat.Name,
 			Description: cat.Description,
 			TypeID:      typeID,
+			Type:        cat.Type,
 			IsActive:    true,
 		}
 
@@ -314,22 +302,25 @@ func ImportDefaultPrompts(ctx context.Context, db *gorm.DB) error {
 
 	// Import prompts
 	for _, p := range defaultData.Prompts {
-		// Use English translation as default
-		enTrans := p.Translations["en"]
-		if enTrans.Name == "" {
-			// If no English translation, use the default name
-			enTrans.Name = p.Name
-		}
-
 		prompt := Prompt{
-			Type:         p.Type,
-			Name:         enTrans.Name,
-			Description:  "", // No description in the current format
-			SystemPrompt: enTrans.SystemPrompt,
-			UserPrompt:   enTrans.UserPrompt,
+			Type:         PromptType(p.Type),
+			Name:         p.Name,
+			Description:  p.Description,
+			SystemPrompt: p.SystemPrompt,
+			UserPrompt:   p.UserPrompt,
 			Version:      p.Version,
 			IsActive:     p.IsActive,
 		}
+
+		// Validate the prompt type
+		switch prompt.Type {
+		case BillAnalysisPrompt, ReceiptAnalysisPrompt, BankStatementAnalysisPrompt, TransactionCategorizationPrompt:
+			// Valid prompt type
+		default:
+			return fmt.Errorf("invalid prompt type: %s", p.Type)
+		}
+
+		// Create the prompt with a unique index on type and active status
 		if err := db.Create(&prompt).Error; err != nil {
 			return fmt.Errorf("failed to create prompt %s: %w", p.Name, err)
 		}

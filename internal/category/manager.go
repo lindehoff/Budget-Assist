@@ -57,12 +57,6 @@ type CreateSubcategoryRequest struct {
 	IsSystem           bool     // Whether this is a system subcategory
 }
 
-// TranslationData represents translation information
-type TranslationData struct {
-	Name        string
-	Description string
-}
-
 // UpdateCategoryRequest represents the data needed to update a category
 type UpdateCategoryRequest struct {
 	Name                string
@@ -95,17 +89,15 @@ func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest)
 		}
 	}
 
-	// Create the category
 	category := &db.Category{
 		Name:               req.Name,
 		Description:        req.Description,
-		Type:               req.Type,
 		TypeID:             req.TypeID,
+		Type:               req.Type,
 		InstanceIdentifier: req.InstanceIdentifier,
 		IsActive:           true,
 	}
 
-	// Create category first
 	if err := m.store.CreateCategory(ctx, category); err != nil {
 		return nil, CategoryError{
 			Operation: "create",
@@ -115,27 +107,44 @@ func (m *Manager) CreateCategory(ctx context.Context, req CreateCategoryRequest)
 	}
 
 	// Link subcategories if provided
-	if len(req.Subcategories) > 0 {
-		for _, subcatName := range req.Subcategories {
-			// Find subcategory by name
-			subcat, err := m.store.GetSubcategoryByName(ctx, subcatName)
-			if err != nil {
-				m.logger.Error("failed to find subcategory",
-					"name", subcatName,
-					"error", err)
-				continue
+	for _, subcatName := range req.Subcategories {
+		subcat, err := m.store.GetSubcategoryByName(ctx, subcatName)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				// Create new subcategory if it doesn't exist
+				subcat = &db.Subcategory{
+					Name:        subcatName,
+					Description: subcatName,
+					IsSystem:    false,
+					IsActive:    true,
+				}
+				if err := m.store.CreateSubcategory(ctx, subcat); err != nil {
+					return nil, CategoryError{
+						Operation: "create_subcategory",
+						Category:  subcatName,
+						Err:       err,
+					}
+				}
+			} else {
+				return nil, CategoryError{
+					Operation: "get_subcategory",
+					Category:  subcatName,
+					Err:       err,
+				}
 			}
+		}
 
-			link := &db.CategorySubcategory{
-				CategoryID:    category.ID,
-				SubcategoryID: subcat.ID,
-				IsActive:      true,
-			}
-			if err := m.store.CreateCategorySubcategory(ctx, link); err != nil {
-				m.logger.Error("failed to link subcategory",
-					"category_id", category.ID,
-					"subcategory_name", subcatName,
-					"error", err)
+		// Link the subcategory to the category
+		link := &db.CategorySubcategory{
+			CategoryID:    category.ID,
+			SubcategoryID: subcat.ID,
+			IsActive:      true,
+		}
+		if err := m.store.CreateCategorySubcategory(ctx, link); err != nil {
+			return nil, CategoryError{
+				Operation: "link_subcategory",
+				Category:  req.Name,
+				Err:       err,
 			}
 		}
 	}
@@ -405,19 +414,18 @@ type CategorySuggestion struct {
 	Confidence   float64
 }
 
+// Validate validates the create category request
 func (r *CreateCategoryRequest) Validate() error {
 	if r.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if r.Type == "" {
-		return fmt.Errorf("type is required")
-	}
 	if r.TypeID == 0 {
-		return fmt.Errorf("type ID is required")
+		return fmt.Errorf("type_id is required")
 	}
 	return nil
 }
 
+// Validate validates the create subcategory request
 func (r *CreateSubcategoryRequest) Validate() error {
 	if r.Name == "" {
 		return fmt.Errorf("name is required")
@@ -425,32 +433,9 @@ func (r *CreateSubcategoryRequest) Validate() error {
 	return nil
 }
 
-func (m *Manager) createTranslations(ctx context.Context, categoryID uint, translations map[string]TranslationData) error {
-	for langCode, data := range translations {
-		translation := &db.Translation{
-			EntityID:     categoryID,
-			EntityType:   "category",
-			LanguageCode: langCode,
-			Name:         data.Name,
-			Description:  data.Description,
-		}
-		if err := m.store.CreateTranslation(ctx, translation); err != nil {
-			return fmt.Errorf("failed to create translation for language %s: %w", langCode, err)
-		}
-	}
-	return nil
-}
-
-// CreateTranslation creates a new translation for an entity
-func (m *Manager) CreateTranslation(ctx context.Context, translation *db.Translation) error {
-	if err := m.store.CreateTranslation(ctx, translation); err != nil {
-		return CategoryError{
-			Operation: "create_translation",
-			Category:  fmt.Sprintf("%s_%d", translation.EntityType, translation.EntityID),
-			Err:       err,
-		}
-	}
-	return nil
+// GetStore returns the underlying store
+func (m *Manager) GetStore() db.Store {
+	return m.store
 }
 
 // CreateCategoryType creates a new category type
@@ -463,32 +448,4 @@ func (m *Manager) CreateCategoryType(ctx context.Context, categoryType *db.Categ
 		}
 	}
 	return nil
-}
-
-// CreateCategoryWithTranslations creates a new category with the given translations
-func (m *Manager) CreateCategoryWithTranslations(ctx context.Context, name, description string, typeID uint, translations map[string]TranslationData, subcategoryIDs []uint) (*db.Category, error) {
-	req := CreateCategoryRequest{
-		Name:          name,
-		Description:   description,
-		TypeID:        typeID,
-		Subcategories: make([]string, 0), // Convert IDs to names
-	}
-
-	return m.CreateCategory(ctx, req)
-}
-
-// CreateSubcategoryWithTranslations creates a new subcategory with the given translations
-func (m *Manager) CreateSubcategoryWithTranslations(ctx context.Context, name, description string, isSystem bool, translations map[string]TranslationData) (*db.Subcategory, error) {
-	req := CreateSubcategoryRequest{
-		Name:        name,
-		Description: description,
-		IsSystem:    isSystem,
-	}
-
-	return m.CreateSubcategory(ctx, req)
-}
-
-// GetStore returns the underlying store
-func (m *Manager) GetStore() db.Store {
-	return m.store
 }

@@ -167,9 +167,8 @@ func (p *Pipeline) processPDF(ctx context.Context, path string, opts ProcessOpti
 
 		// Analyze transaction for categorization with insights
 		analysis, err := p.aiService.AnalyzeTransaction(ctx, &dbTx, ai.AnalysisOptions{
-			DocumentType:     opts.DocumentType,
-			TransactionHints: opts.TransactionInsights,
-			CategoryHints:    opts.CategoryInsights,
+			DocumentType:    opts.DocumentType,
+			RuntimeInsights: opts.TransactionInsights + "\n" + opts.CategoryInsights,
 		})
 		if err != nil {
 			p.logger.Error("failed to analyze transaction", "error", err)
@@ -225,9 +224,8 @@ func (p *Pipeline) processCSV(ctx context.Context, path string, opts ProcessOpti
 		// Only analyze with AI if service is available
 		if p.aiService != nil {
 			analysis, err := p.aiService.AnalyzeTransaction(ctx, &dbTx, ai.AnalysisOptions{
-				DocumentType:     opts.DocumentType,
-				TransactionHints: opts.TransactionInsights,
-				CategoryHints:    opts.CategoryInsights,
+				DocumentType:    opts.DocumentType,
+				RuntimeInsights: opts.TransactionInsights + "\n" + opts.CategoryInsights,
 			})
 			if err != nil {
 				p.logger.Error("failed to analyze transaction", "error", err)

@@ -14,30 +14,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// EntityType represents the type of entity that can be translated
-type EntityType string
-
-const (
-	EntityTypeCategoryType EntityType = "category_type"
-	EntityTypeCategory     EntityType = "category"
-	EntityTypeSubcategory  EntityType = "subcategory"
-)
-
-// Translation represents a localized name for an entity
-type Translation struct {
-	gorm.Model
-	EntityID     uint   `gorm:"not null"`
-	EntityType   string `gorm:"not null"`
-	LanguageCode string `gorm:"not null"`
-	Name         string `gorm:"not null"`
-	Description  string
-}
-
 // CategoryType represents different types of categories (e.g., VEHICLE, PROPERTY)
 type CategoryType struct {
 	ID          uint       `gorm:"primarykey"`
-	CreatedAt   time.Time  `gorm:"not null"`
-	UpdatedAt   time.Time  `gorm:"not null"`
 	Name        string     `gorm:"not null;unique;size:100"`
 	Description string     `gorm:"size:500"`
 	IsMultiple  bool       `gorm:"not null"`
@@ -46,7 +25,7 @@ type CategoryType struct {
 
 // Category represents a main category
 type Category struct {
-	gorm.Model
+	ID                 uint   `gorm:"primarykey"`
 	Name               string `gorm:"not null;size:100"`
 	Description        string `gorm:"size:500"`
 	TypeID             uint   `gorm:"not null"`
@@ -58,7 +37,7 @@ type Category struct {
 
 // Subcategory represents a subcategory that can be linked to multiple categories
 type Subcategory struct {
-	gorm.Model
+	ID          uint   `gorm:"primarykey"`
 	Name        string `gorm:"not null;size:100"`
 	Description string `gorm:"size:500"`
 	IsActive    bool   `gorm:"default:true"`
@@ -69,7 +48,7 @@ type Subcategory struct {
 
 // Tag represents a label that can be attached to subcategories
 type Tag struct {
-	gorm.Model
+	ID            uint   `gorm:"primarykey"`
 	Name          string `gorm:"uniqueIndex;not null"`
 	Description   string
 	Subcategories []Subcategory `gorm:"many2many:subcategory_tags"`
@@ -86,7 +65,7 @@ type CategorySubcategory struct {
 
 // Transaction represents a financial transaction
 type Transaction struct {
-	gorm.Model
+	ID              uint `gorm:"primarykey"`
 	Date            time.Time
 	TransactionDate time.Time
 	Amount          decimal.Decimal
@@ -124,8 +103,6 @@ type Budget struct {
 	CategoryID     uint `gorm:"not null"`
 	SubcategoryID  *uint
 	Amount         float64      `gorm:"not null"`
-	CreatedAt      time.Time    `gorm:"not null"`
-	UpdatedAt      time.Time    `gorm:"not null"`
 	StartDate      time.Time    `gorm:"not null"`
 	EndDate        time.Time    `gorm:"not null"`
 	Description    string       `gorm:"size:500"`
@@ -138,19 +115,13 @@ type Budget struct {
 
 // Report represents saved analysis reports
 type Report struct {
-	gorm.Model
+	ID          uint      `gorm:"primarykey"`
 	Name        string    `gorm:"not null"`
 	Type        string    // "spending", "income", "budget-comparison", etc.
 	Parameters  string    // JSON string of report parameters
 	GeneratedAt time.Time `gorm:"not null"`
 	Data        string    // JSON string of report data
 }
-
-// Language code constants
-const (
-	LangEN = "en" // English (default)
-	LangSV = "sv" // Swedish
-)
 
 // Currency constants
 const (
@@ -165,16 +136,24 @@ const (
 	PeriodYearly  = "yearly"
 )
 
+// PromptType represents different types of prompts
+type PromptType string
+
+const (
+	BillAnalysisPrompt              PromptType = "bill_analysis"
+	ReceiptAnalysisPrompt           PromptType = "receipt_analysis"
+	BankStatementAnalysisPrompt     PromptType = "bank_statement_analysis"
+	TransactionCategorizationPrompt PromptType = "transaction_categorization"
+)
+
 // Prompt represents an AI prompt template
 type Prompt struct {
-	gorm.Model
-	Type         string `gorm:"not null;size:50"`
-	Name         string `gorm:"not null;size:100"`
-	Description  string `gorm:"size:500"`
-	SystemPrompt string `gorm:"not null;type:text"`
-	UserPrompt   string `gorm:"not null;type:text"`
-	Examples     string `gorm:"type:text"` // JSON string of examples
-	Rules        string `gorm:"type:text"` // JSON string of rules
-	Version      string `gorm:"not null;size:20"`
-	IsActive     bool   `gorm:"not null"`
+	ID           uint       `gorm:"primarykey"`
+	Type         PromptType `gorm:"not null;size:50;uniqueIndex:idx_prompt_type_active"`
+	Name         string     `gorm:"not null;size:100"`
+	Description  string     `gorm:"size:500"`
+	SystemPrompt string     `gorm:"not null;type:text"`
+	UserPrompt   string     `gorm:"not null;type:text"`
+	Version      string     `gorm:"not null;size:20"`
+	IsActive     bool       `gorm:"not null;uniqueIndex:idx_prompt_type_active"`
 }

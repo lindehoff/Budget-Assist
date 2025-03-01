@@ -45,12 +45,6 @@ type Store interface {
 	CreateCategorySubcategory(ctx context.Context, link *CategorySubcategory) error
 	DeleteCategorySubcategory(ctx context.Context, categoryID, subcategoryID uint) error
 
-	// Translation operations
-	CreateTranslation(ctx context.Context, translation *Translation) error
-	UpdateTranslation(ctx context.Context, translation *Translation) error
-	GetTranslationByID(ctx context.Context, id uint) (*Translation, error)
-	ListTranslations(ctx context.Context, entityType string, entityID uint) ([]Translation, error)
-
 	// Transaction operations
 	CreateTransaction(ctx context.Context, transaction *Transaction) error
 	UpdateTransaction(ctx context.Context, transaction *Transaction) error
@@ -74,9 +68,6 @@ type Store interface {
 
 	// Close closes the database connection
 	Close() error
-
-	// New method for GetTranslations
-	GetTranslations(ctx context.Context, entityID uint, entityType string) ([]Translation, error)
 }
 
 // SQLStore implements Store interface using GORM
@@ -85,8 +76,38 @@ type SQLStore struct {
 	logger *slog.Logger
 }
 
-// NewStore creates a new database store
+// NewStore creates a new SQLStore instance
 func NewStore(db *gorm.DB, logger *slog.Logger) Store {
+	// Ensure the database schema is up to date
+	if err := db.AutoMigrate(
+		&CategoryType{},
+		&Category{},
+		&Subcategory{},
+		&Tag{},
+		&CategorySubcategory{},
+		&Transaction{},
+		&Budget{},
+		&Report{},
+		&Prompt{},
+	); err != nil {
+		logger.Error("failed to migrate database schema", "error", err)
+		return nil
+	}
+
+	// Drop old tables if they exist
+	if db.Migrator().HasTable("translations") {
+		if err := db.Migrator().DropTable("translations"); err != nil {
+			logger.Error("failed to drop translations table", "error", err)
+		}
+	}
+
+	// Add unique index for prompt type and active status if it doesn't exist
+	if !db.Migrator().HasIndex(&Prompt{}, "idx_prompt_type_active") {
+		if err := db.Migrator().CreateIndex(&Prompt{}, "idx_prompt_type_active"); err != nil {
+			logger.Error("failed to add prompt index", "error", err)
+		}
+	}
+
 	return &SQLStore{
 		db:     db,
 		logger: logger,
@@ -306,63 +327,6 @@ func (s *SQLStore) DeleteCategorySubcategory(ctx context.Context, categoryID, su
 	return nil
 }
 
-// CreateTranslation creates a new translation in the database
-func (s *SQLStore) CreateTranslation(ctx context.Context, translation *Translation) error {
-	// Validate required fields
-	if translation.Name == "" {
-		return fmt.Errorf("translation name is required")
-	}
-	if translation.EntityID == 0 {
-		return fmt.Errorf("entity ID is required")
-	}
-	if translation.EntityType == "" {
-		return fmt.Errorf("entity type is required")
-	}
-	if translation.LanguageCode == "" {
-		return fmt.Errorf("language code is required")
-	}
-
-	result := s.db.WithContext(ctx).Create(translation)
-	if result.Error != nil {
-		return fmt.Errorf("failed to create translation: %w", result.Error)
-	}
-	return nil
-}
-
-// UpdateTranslation updates an existing translation in the database
-func (s *SQLStore) UpdateTranslation(ctx context.Context, translation *Translation) error {
-	result := s.db.WithContext(ctx).Save(translation)
-	if result.Error != nil {
-		return fmt.Errorf("failed to update translation: %w", result.Error)
-	}
-	return nil
-}
-
-// GetTranslationByID retrieves a translation by its ID
-func (s *SQLStore) GetTranslationByID(ctx context.Context, id uint) (*Translation, error) {
-	var translation Translation
-	result := s.db.WithContext(ctx).First(&translation, id)
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("failed to get translation: %w", result.Error)
-	}
-	return &translation, nil
-}
-
-// ListTranslations retrieves all translations for a given entity
-func (s *SQLStore) ListTranslations(ctx context.Context, entityType string, entityID uint) ([]Translation, error) {
-	var translations []Translation
-	result := s.db.WithContext(ctx).
-		Where("entity_type = ? AND entity_id = ?", entityType, entityID).
-		Find(&translations)
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to get translations: %w", result.Error)
-	}
-	return translations, nil
-}
-
 // CreateTransaction creates a new transaction in the database
 func (s *SQLStore) CreateTransaction(ctx context.Context, transaction *Transaction) error {
 	if err := s.db.WithContext(ctx).Create(transaction).Error; err != nil {
@@ -518,32 +482,6 @@ func (s *SQLStore) Close() error {
 		return fmt.Errorf("failed to get underlying SQL DB: %w", err)
 	}
 	return sqlDB.Close()
-}
-
-// GetTranslations retrieves translations for a given entity
-func (s *SQLStore) GetTranslations(ctx context.Context, entityID uint, entityType string) ([]Translation, error) {
-	// First check if the entity exists
-	switch entityType {
-	case "category":
-		var category Category
-		if err := s.db.First(&category, entityID).Error; err != nil {
-			return nil, err
-		}
-	case "subcategory":
-		var subcategory Subcategory
-		if err := s.db.First(&subcategory, entityID).Error; err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("unsupported entity type: %s", entityType)
-	}
-
-	var translations []Translation
-	if err := s.db.Where("entity_id = ? AND entity_type = ?", entityID, entityType).Find(&translations).Error; err != nil {
-		return nil, err
-	}
-
-	return translations, nil
 }
 
 // CreateTag creates a new tag

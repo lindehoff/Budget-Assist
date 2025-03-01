@@ -81,14 +81,23 @@ func NewOpenAIService(config Config, store db.Store, logger *slog.Logger) *OpenA
 
 // AnalyzeTransaction analyzes a transaction using OpenAI's API.
 func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts AnalysisOptions) (*Analysis, error) {
-	template, err := s.promptMgr.GetPrompt(ctx, TransactionAnalysisPrompt)
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, &OperationError{
-				Operation: "AnalyzeTransaction",
-				Err:       ctx.Err(),
-			}
+	var promptType db.PromptType
+	switch opts.DocumentType {
+	case "bill":
+		promptType = db.BillAnalysisPrompt
+	case "receipt":
+		promptType = db.ReceiptAnalysisPrompt
+	case "bank_statement":
+		promptType = db.BankStatementAnalysisPrompt
+	default:
+		return nil, &OperationError{
+			Operation: "AnalyzeTransaction",
+			Err:       fmt.Errorf("unsupported document type: %s", opts.DocumentType),
 		}
+	}
+
+	template, err := s.promptMgr.GetPrompt(ctx, promptType)
+	if err != nil {
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       err,
@@ -99,20 +108,12 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		Description     string
 		Amount          string
 		Date            string
-		Rules           []Rule
-		Examples        []Example
-		DocumentType    string
-		TransactionHint string
-		CategoryHint    string
+		RuntimeInsights string
 	}{
 		Description:     tx.Description,
 		Amount:          fmt.Sprintf("%s %s", tx.Amount.String(), tx.Currency),
 		Date:            tx.TransactionDate.Format("2006-01-02"),
-		Rules:           template.Rules,
-		Examples:        template.Examples,
-		DocumentType:    opts.DocumentType,
-		TransactionHint: opts.TransactionHints,
-		CategoryHint:    opts.CategoryHints,
+		RuntimeInsights: opts.RuntimeInsights,
 	}
 
 	prompt, err := template.Execute(data)
@@ -141,12 +142,6 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	var result Analysis
 	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, &OperationError{
-				Operation: "AnalyzeTransaction",
-				Err:       ctx.Err(),
-			}
-		}
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       err,
@@ -165,7 +160,7 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 		}
 	}
 
-	template, err := s.promptMgr.GetPrompt(ctx, DocumentExtractionPrompt)
+	template, err := s.promptMgr.GetPrompt(ctx, db.BillAnalysisPrompt)
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
@@ -216,7 +211,7 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 
 // SuggestCategories suggests categories for a given description using OpenAI's API.
 func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error) {
-	template, err := s.promptMgr.GetPrompt(ctx, TransactionCategorizationPrompt)
+	template, err := s.promptMgr.GetPrompt(ctx, db.TransactionCategorizationPrompt)
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "SuggestCategories",
@@ -226,10 +221,8 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 
 	data := struct {
 		Description string
-		Categories  []Category
 	}{
 		Description: desc,
-		Categories:  template.Categories,
 	}
 
 	prompt, err := template.Execute(data)
@@ -258,7 +251,10 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 	var result []CategoryMatch
 	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
 	if err != nil {
-		return nil, err
+		return nil, &OperationError{
+			Operation: "SuggestCategories",
+			Err:       err,
+		}
 	}
 
 	return result, nil

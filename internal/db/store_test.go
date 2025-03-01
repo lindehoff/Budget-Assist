@@ -23,7 +23,6 @@ func createTestDB(t *testing.T) *gorm.DB {
 		&Subcategory{},
 		&CategorySubcategory{},
 		&Tag{},
-		&Translation{},
 		&Transaction{},
 		&Prompt{},
 	); err != nil {

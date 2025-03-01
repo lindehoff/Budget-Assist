@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/lindehoff/Budget-Assist/internal/ai"
+	"github.com/lindehoff/Budget-Assist/internal/db"
 	"github.com/spf13/cobra"
 )
 
@@ -64,7 +65,14 @@ The output includes template details such as:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
 
-		prompts := promptManager.ListPrompts(cmd.Context())
+		prompts, err := promptManager.ListPrompts(cmd.Context())
+		if err != nil {
+			return &PromptError{
+				Operation: "list",
+				Prompt:    "all",
+				Err:       err,
+			}
+		}
 		if len(prompts) == 0 {
 			fmt.Println("No prompt templates found")
 			return nil
@@ -88,20 +96,24 @@ var promptAddCmd = &cobra.Command{
 	Long: `Create a new prompt template with the specified details.
 	
 The template requires:
-- Type (e.g., transaction_categorization, document_extraction)
+- Type (e.g., bill_analysis, receipt_analysis)
 - Name and description
-- System and user prompts
-- Optional rules and examples`,
+- System and user prompts`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		promptType := ai.PromptType(args[0])
+		promptType := db.PromptType(args[0])
 		name := args[1]
 		systemPrompt, _ := cmd.Flags().GetString("system")
 		userPrompt, _ := cmd.Flags().GetString("user")
 
-		template := ai.NewPromptTemplate(promptType, name)
-		template.SystemPrompt = systemPrompt
-		template.UserPrompt = userPrompt
+		template := &ai.PromptTemplate{
+			Type:         promptType,
+			Name:         name,
+			SystemPrompt: systemPrompt,
+			UserPrompt:   userPrompt,
+			Version:      "1.0.0",
+			IsActive:     true,
+		}
 
 		if err := promptManager.UpdatePrompt(cmd.Context(), template); err != nil {
 			return &PromptError{
@@ -124,11 +136,10 @@ var promptUpdateCmd = &cobra.Command{
 	
 You can update:
 - System and user prompts
-- Rules and examples
 - Active status`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		promptType := ai.PromptType(args[0])
+		promptType := db.PromptType(args[0])
 
 		// Get the existing template
 		template, err := promptManager.GetPrompt(cmd.Context(), promptType)
@@ -179,7 +190,7 @@ This command allows you to:
 - Validate template syntax`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		promptType := ai.PromptType(args[0])
+		promptType := db.PromptType(args[0])
 		data, _ := cmd.Flags().GetString("data")
 
 		// Parse the JSON data
@@ -221,7 +232,7 @@ This command allows you to:
 			fmt.Println("\nAI Service response:")
 			fmt.Println("------------------")
 			switch promptType {
-			case ai.TransactionCategorizationPrompt:
+			case db.TransactionCategorizationPrompt:
 				// Extract description from the JSON data
 				data, ok := templateData.(map[string]interface{})
 				if !ok {
@@ -247,11 +258,28 @@ This command allows you to:
 						Err:       err,
 					}
 				}
-				return printJSON(matches)
-
-			case ai.DocumentExtractionPrompt:
-				doc := &ai.Document{Content: []byte(data)}
-				extraction, err := aiService.ExtractDocument(cmd.Context(), doc)
+				for _, match := range matches {
+					fmt.Printf("Category: %s (confidence: %.2f)\n", match.Category, match.Confidence)
+				}
+			case db.BillAnalysisPrompt:
+				// Extract content from the JSON data
+				data, ok := templateData.(map[string]interface{})
+				if !ok {
+					return &PromptError{
+						Operation: "test",
+						Prompt:    string(promptType),
+						Err:       fmt.Errorf("invalid data format: expected JSON object"),
+					}
+				}
+				content, ok := data["Content"].(string)
+				if !ok {
+					return &PromptError{
+						Operation: "test",
+						Prompt:    string(promptType),
+						Err:       fmt.Errorf("missing or invalid Content field"),
+					}
+				}
+				extraction, err := aiService.ExtractDocument(cmd.Context(), &ai.Document{Content: []byte(content)})
 				if err != nil {
 					return &PromptError{
 						Operation: "test",
@@ -259,10 +287,9 @@ This command allows you to:
 						Err:       err,
 					}
 				}
-				return printJSON(extraction)
-
+				fmt.Printf("Extracted content: %s\n", extraction.Content)
 			default:
-				fmt.Println("No test implementation for this prompt type")
+				fmt.Println("Testing not implemented for this prompt type")
 			}
 		}
 
@@ -279,7 +306,6 @@ var promptImportCmd = &cobra.Command{
 The file should contain a JSON array of prompt templates with:
 - Type and name
 - System and user prompts
-- Optional examples and rules
 - Language translations`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -299,6 +325,7 @@ The file should contain a JSON array of prompt templates with:
 			Prompts []struct {
 				Type         string `json:"type"`
 				Name         string `json:"name"`
+				Description  string `json:"description"`
 				Translations map[string]struct {
 					Name         string `json:"name"`
 					SystemPrompt string `json:"system_prompt"`
@@ -332,11 +359,15 @@ The file should contain a JSON array of prompt templates with:
 				}
 			}
 
-			template := ai.NewPromptTemplate(ai.PromptType(p.Type), p.Name)
-			template.SystemPrompt = p.Translations[defaultLang].SystemPrompt
-			template.UserPrompt = p.Translations[defaultLang].UserPrompt
-			template.Version = p.Version
-			template.IsActive = p.IsActive
+			template := &ai.PromptTemplate{
+				Type:         db.PromptType(p.Type),
+				Name:         p.Name,
+				Description:  p.Description,
+				SystemPrompt: p.Translations[defaultLang].SystemPrompt,
+				UserPrompt:   p.Translations[defaultLang].UserPrompt,
+				Version:      p.Version,
+				IsActive:     p.IsActive,
+			}
 
 			if err := promptManager.UpdatePrompt(cmd.Context(), template); err != nil {
 				return &PromptError{
@@ -354,7 +385,7 @@ The file should contain a JSON array of prompt templates with:
 
 func outputPromptTable(prompts []*ai.PromptTemplate) error {
 	table := newTable()
-	table.SetHeader([]string{"Type", "Name", "Version", "Active", "Updated"})
+	table.SetHeader([]string{"Type", "Name", "Version", "Active"})
 
 	for _, p := range prompts {
 		active := "✓"
@@ -366,7 +397,6 @@ func outputPromptTable(prompts []*ai.PromptTemplate) error {
 			p.Name,
 			p.Version,
 			active,
-			p.UpdatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
 
