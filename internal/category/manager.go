@@ -243,6 +243,91 @@ func (m *Manager) getOrCreateTag(ctx context.Context, name string) (*db.Tag, err
 	return tag, nil
 }
 
+// updateBasicFields updates the basic fields of a category
+func (m *Manager) updateBasicFields(category *db.Category, req UpdateCategoryRequest) {
+	if req.Name != "" {
+		category.Name = req.Name
+	}
+	if req.Description != "" {
+		category.Description = req.Description
+	}
+	if req.IsActive != nil {
+		category.IsActive = *req.IsActive
+	}
+	if req.InstanceIdentifier != "" {
+		category.InstanceIdentifier = req.InstanceIdentifier
+	}
+}
+
+// addSubcategories adds new subcategories to a category
+func (m *Manager) addSubcategories(ctx context.Context, category *db.Category, subcatNames []string) {
+	for _, subcatName := range subcatNames {
+		subcat, err := m.getOrCreateSubcategory(ctx, subcatName)
+		if err != nil {
+			m.logger.Error("failed to get/create subcategory",
+				"name", subcatName,
+				"error", err)
+			continue
+		}
+
+		link := &db.CategorySubcategory{
+			CategoryID:    category.ID,
+			SubcategoryID: subcat.ID,
+			IsActive:      true,
+		}
+		if err := m.store.CreateCategorySubcategory(ctx, link); err != nil {
+			m.logger.Error("failed to add subcategory link",
+				"category_id", category.ID,
+				"subcategory_name", subcatName,
+				"error", err)
+		}
+	}
+}
+
+// removeSubcategories removes subcategories from a category
+func (m *Manager) removeSubcategories(ctx context.Context, category *db.Category, subcatNames []string) {
+	for _, subcatName := range subcatNames {
+		subcat, err := m.store.GetSubcategoryByName(ctx, subcatName)
+		if err != nil {
+			m.logger.Error("failed to find subcategory",
+				"name", subcatName,
+				"error", err)
+			continue
+		}
+
+		if err := m.store.DeleteCategorySubcategory(ctx, category.ID, subcat.ID); err != nil {
+			m.logger.Error("failed to remove subcategory link",
+				"category_id", category.ID,
+				"subcategory_name", subcatName,
+				"error", err)
+		}
+	}
+}
+
+// getOrCreateSubcategory gets an existing subcategory or creates a new one
+func (m *Manager) getOrCreateSubcategory(ctx context.Context, name string) (*db.Subcategory, error) {
+	subcat, err := m.store.GetSubcategoryByName(ctx, name)
+	if err == nil {
+		return subcat, nil
+	}
+
+	if !errors.Is(err, db.ErrNotFound) {
+		return nil, err
+	}
+
+	// Create new subcategory if it doesn't exist
+	subcat = &db.Subcategory{
+		Name:        name,
+		Description: name,
+		IsSystem:    false,
+		IsActive:    true,
+	}
+	if err := m.store.CreateSubcategory(ctx, subcat); err != nil {
+		return nil, err
+	}
+	return subcat, nil
+}
+
 // UpdateCategory updates an existing category
 func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategoryRequest) (*db.Category, error) {
 	category, err := m.store.GetCategoryByID(ctx, id)
@@ -262,63 +347,15 @@ func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategor
 	}
 
 	// Update basic fields
-	if req.Name != "" {
-		category.Name = req.Name
-	}
-	if req.Description != "" {
-		category.Description = req.Description
-	}
-	if req.IsActive != nil {
-		category.IsActive = *req.IsActive
-	}
-	if req.InstanceIdentifier != "" {
-		category.InstanceIdentifier = req.InstanceIdentifier
-	}
+	m.updateBasicFields(category, req)
 
 	// Update category-subcategory relationships
 	if len(req.AddSubcategories) > 0 {
-		for _, subcatName := range req.AddSubcategories {
-			// Find subcategory by name
-			subcat, err := m.store.GetSubcategoryByName(ctx, subcatName)
-			if err != nil {
-				m.logger.Error("failed to find subcategory",
-					"name", subcatName,
-					"error", err)
-				continue
-			}
-
-			link := &db.CategorySubcategory{
-				CategoryID:    category.ID,
-				SubcategoryID: subcat.ID,
-				IsActive:      true,
-			}
-			if err := m.store.CreateCategorySubcategory(ctx, link); err != nil {
-				m.logger.Error("failed to add subcategory link",
-					"category_id", category.ID,
-					"subcategory_name", subcatName,
-					"error", err)
-			}
-		}
+		m.addSubcategories(ctx, category, req.AddSubcategories)
 	}
 
 	if len(req.RemoveSubcategories) > 0 {
-		for _, subcatName := range req.RemoveSubcategories {
-			// Find subcategory by name
-			subcat, err := m.store.GetSubcategoryByName(ctx, subcatName)
-			if err != nil {
-				m.logger.Error("failed to find subcategory",
-					"name", subcatName,
-					"error", err)
-				continue
-			}
-
-			if err := m.store.DeleteCategorySubcategory(ctx, category.ID, subcat.ID); err != nil {
-				m.logger.Error("failed to remove subcategory link",
-					"category_id", category.ID,
-					"subcategory_name", subcatName,
-					"error", err)
-			}
-		}
+		m.removeSubcategories(ctx, category, req.RemoveSubcategories)
 	}
 
 	// Save the updated category
@@ -330,7 +367,7 @@ func (m *Manager) UpdateCategory(ctx context.Context, id uint, req UpdateCategor
 		}
 	}
 
-	// Fetch the updated category to get the latest translations
+	// Fetch the updated category to get the latest state
 	return m.GetCategoryByID(ctx, id)
 }
 

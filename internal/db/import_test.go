@@ -264,7 +264,7 @@ func Test_ImportDefaultPrompts(t *testing.T) {
 			jsonContent: `{
 				"prompts": [
 					{
-						"type": "transaction",
+						"type": "transaction_categorization",
 						"name": "Test Prompt",
 						"translations": {
 							"en": {
@@ -292,8 +292,8 @@ func Test_ImportDefaultPrompts(t *testing.T) {
 				}
 
 				// Verify all fields
-				if prompt.Type != "transaction" {
-					t.Errorf("expected type %q, got %q", "transaction", prompt.Type)
+				if prompt.Type != "transaction_categorization" {
+					t.Errorf("expected type %q, got %q", "transaction_categorization", prompt.Type)
 				}
 				if prompt.SystemPrompt != "You are a helpful assistant" {
 					t.Errorf("expected system prompt %q, got %q", "You are a helpful assistant", prompt.SystemPrompt)
@@ -319,7 +319,7 @@ func Test_ImportDefaultPrompts(t *testing.T) {
 			jsonContent: `{
 				"prompts": [
 					{
-						"type": "transaction"
+						"type": "transaction_categorization"
 						"name": "Test Prompt",
 					}
 				]
@@ -346,7 +346,7 @@ func Test_ImportDefaultPrompts(t *testing.T) {
 			jsonContent: `{
 				"prompts": [
 					{
-						"type": "transaction",
+						"type": "transaction_categorization",
 						"name": "Test Prompt",
 						"description": "Test Description",
 						"systemPrompt": "You are a helpful assistant",

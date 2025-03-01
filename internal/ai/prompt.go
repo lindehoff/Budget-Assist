@@ -46,7 +46,7 @@ func (pt *PromptTemplate) Execute(data any) (string, error) {
 	// Parse and execute the system prompt
 	systemTmpl, err := template.New("system").Parse(pt.SystemPrompt)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse system prompt: %w", err)
+		return "", fmt.Errorf("failed to parse system prompt template: %w", err)
 	}
 
 	var systemBuf bytes.Buffer
@@ -57,7 +57,7 @@ func (pt *PromptTemplate) Execute(data any) (string, error) {
 	// Parse and execute the user prompt
 	userTmpl, err := template.New("user").Parse(pt.UserPrompt)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse user prompt: %w", err)
+		return "", fmt.Errorf("failed to parse user prompt template: %w", err)
 	}
 
 	var userBuf bytes.Buffer

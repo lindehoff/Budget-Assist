@@ -84,7 +84,7 @@ type Transaction struct {
 
 // FormatAmount returns the amount formatted with the currency
 func (t *Transaction) FormatAmount() string {
-	return fmt.Sprintf("%s %s", t.Amount.String(), t.Currency)
+	return fmt.Sprintf("%s %s", t.Amount.StringFixed(2), t.Currency)
 }
 
 // BeforeCreate hook to validate the currency

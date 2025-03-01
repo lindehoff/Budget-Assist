@@ -60,10 +60,11 @@ var promptListCmd = &cobra.Command{
 The output includes template details such as:
 - Type and name
 - Version and status
-- System and user prompts
+- System and user prompts (when --show-prompts is used)
 - Associated rules and examples`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
+		showPrompts, _ := cmd.Flags().GetBool("show-prompts")
 
 		prompts, err := promptManager.ListPrompts(cmd.Context())
 		if err != nil {
@@ -82,7 +83,7 @@ The output includes template details such as:
 		case "json":
 			return printJSON(prompts)
 		case "table":
-			return outputPromptTable(prompts)
+			return outputPromptTable(prompts, showPrompts)
 		default:
 			return fmt.Errorf("unsupported format: %s", format)
 		}
@@ -383,21 +384,37 @@ The file should contain a JSON array of prompt templates with:
 	},
 }
 
-func outputPromptTable(prompts []*ai.PromptTemplate) error {
+func outputPromptTable(prompts []*ai.PromptTemplate, showPrompts bool) error {
 	table := newTable()
-	table.SetHeader([]string{"Type", "Name", "Version", "Active"})
+	if showPrompts {
+		table.SetHeader([]string{"Type", "Name", "Version", "Active", "System Prompt", "User Prompt"})
+	} else {
+		table.SetHeader([]string{"Type", "Name", "Version", "Active"})
+	}
 
 	for _, p := range prompts {
 		active := "✓"
 		if !p.IsActive {
 			active = "✗"
 		}
-		table.Append([]string{
-			string(p.Type),
-			p.Name,
-			p.Version,
-			active,
-		})
+
+		if showPrompts {
+			table.Append([]string{
+				string(p.Type),
+				p.Name,
+				p.Version,
+				active,
+				p.SystemPrompt,
+				p.UserPrompt,
+			})
+		} else {
+			table.Append([]string{
+				string(p.Type),
+				p.Name,
+				p.Version,
+				active,
+			})
+		}
 	}
 
 	table.Render()
@@ -414,6 +431,7 @@ func init() {
 
 	// Add flags for the list command
 	promptListCmd.Flags().StringP("format", "f", "table", "Output format (table|json)")
+	promptListCmd.Flags().BoolP("show-prompts", "p", false, "Show the actual prompt templates")
 
 	// Add flags for the add command
 	promptAddCmd.Flags().StringP("system", "s", "", "System prompt text")

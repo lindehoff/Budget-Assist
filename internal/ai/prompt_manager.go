@@ -39,7 +39,7 @@ func (pm *PromptManager) GetPrompt(ctx context.Context, promptType db.PromptType
 	// Get from database
 	dbPrompt, err := pm.store.GetPromptByType(ctx, string(promptType))
 	if err != nil {
-		return nil, fmt.Errorf("prompt template not found for type: %s: %w", promptType, err)
+		return nil, err
 	}
 	if dbPrompt == nil {
 		return nil, fmt.Errorf("prompt template not found for type: %s", promptType)

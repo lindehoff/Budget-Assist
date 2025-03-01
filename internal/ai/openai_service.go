@@ -13,50 +13,6 @@ import (
 	db "github.com/lindehoff/Budget-Assist/internal/db"
 )
 
-// Common errors
-var (
-	ErrEmptyDocument    = fmt.Errorf("empty document content")
-	ErrNoChoices        = fmt.Errorf("no choices in OpenAI response")
-	ErrEmptyContent     = fmt.Errorf("empty content in OpenAI response")
-	ErrTemplateNotFound = fmt.Errorf("template not found")
-	ErrInvalidOperation = fmt.Errorf("invalid operation")
-)
-
-// OperationError represents an error that occurred during an operation
-type OperationError struct {
-	Err       error
-	Operation string
-	Resource  string
-}
-
-func (e *OperationError) Error() string {
-	if e.Resource != "" {
-		return fmt.Sprintf("%s operation failed for %q: %v", e.Operation, e.Resource, e.Err)
-	}
-	return fmt.Sprintf("%s operation failed: %v", e.Operation, e.Err)
-}
-
-// OpenAIError represents an error from the OpenAI API
-type OpenAIError struct {
-	Operation  string
-	Message    string
-	StatusCode int
-}
-
-func (e *OpenAIError) Error() string {
-	return fmt.Sprintf("OpenAI API error during %s operation (status %d): %s", e.Operation, e.StatusCode, e.Message)
-}
-
-// RateLimitError represents a rate limit error from the OpenAI API
-type RateLimitError struct {
-	Message    string
-	StatusCode int
-}
-
-func (e *RateLimitError) Error() string {
-	return fmt.Sprintf("rate limit exceeded (status %d): %s", e.StatusCode, e.Message)
-}
-
 // OpenAIService implements the Service interface using OpenAI's API.
 type OpenAIService struct {
 	rateLimiter *RateLimiter
@@ -260,162 +216,70 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 	return result, nil
 }
 
-// doRequestWithRetry performs an HTTP request with retry and rate limiting
-func (s *OpenAIService) doRequestWithRetry(ctx context.Context, payload any, out any, endpoint string) error {
-	maxRetries := 3
-	backoff := 1 * time.Second
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if err := s.makeRequest(ctx, payload, out, endpoint); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return &OperationError{
-					Operation: "doRequestWithRetry",
-					Err:       ctx.Err(),
-				}
-			}
-
-			// If it's a rate limit error and we have retries left, wait and try again
-			if _, isRateLimit := err.(*RateLimitError); isRateLimit && attempt < maxRetries-1 {
-				select {
-				case <-ctx.Done():
-					return &OperationError{
-						Operation: "doRequestWithRetry",
-						Err:       ctx.Err(),
-					}
-				case <-time.After(backoff * time.Duration(attempt+1)):
-					continue
-				}
-			}
-
+func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload map[string]any, result interface{}, endpoint string) error {
+	operation := func() error {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
 			return err
+		}
+
+		requestBody, err := json.Marshal(requestPayload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.BaseURL+endpoint, bytes.NewReader(requestBody))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
+
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to send request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusTooManyRequests {
+				return &RateLimitError{
+					Message:    string(body),
+					StatusCode: resp.StatusCode,
+				}
+			}
+			return &OpenAIError{
+				Operation:  "API request",
+				Message:    string(body),
+				StatusCode: resp.StatusCode,
+			}
+		}
+
+		var response ChatCompletionResponse
+		if err := json.Unmarshal(body, &response); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		if len(response.Choices) == 0 {
+			return ErrNoChoices
+		}
+
+		content := response.Choices[0].Message.Content
+		if content == "" {
+			return ErrEmptyContent
+		}
+
+		if err := json.Unmarshal([]byte(content), result); err != nil {
+			return fmt.Errorf("failed to unmarshal content: %w", err)
 		}
 
 		return nil
 	}
 
-	return &OperationError{
-		Operation: "doRequestWithRetry",
-		Err:       fmt.Errorf("max retries exceeded"),
-	}
-}
-
-// makeRequest performs a single HTTP request to the OpenAI API
-func (s *OpenAIService) makeRequest(ctx context.Context, payload any, out any, endpoint string) error {
-	if err := s.rateLimiter.Wait(ctx); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return &OperationError{
-				Operation: "makeRequest",
-				Err:       ctx.Err(),
-			}
-		}
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       fmt.Errorf("rate limit wait failed: %w", err),
-		}
-	}
-
-	url := s.config.BaseURL + endpoint
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       fmt.Errorf("failed to marshal request: %w", err),
-		}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       fmt.Errorf("failed to create request: %w", err),
-		}
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return &OperationError{
-				Operation: "makeRequest",
-				Err:       ctx.Err(),
-			}
-		}
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       fmt.Errorf("request failed: %w", err),
-		}
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       fmt.Errorf("failed to read response body: %w", err),
-		}
-	}
-
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err: &RateLimitError{
-				Message:    "rate limit exceeded",
-				StatusCode: resp.StatusCode,
-			},
-		}
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return &OpenAIError{
-			Operation:  "makeRequest",
-			Message:    string(body),
-			StatusCode: resp.StatusCode,
-		}
-	}
-
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       fmt.Errorf("failed to decode response content: %w", err),
-		}
-	}
-
-	if len(response.Choices) == 0 {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       ErrNoChoices,
-		}
-	}
-
-	content := response.Choices[0].Message.Content
-	if content == "" {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       ErrEmptyContent,
-		}
-	}
-
-	if err := json.Unmarshal([]byte(content), out); err != nil {
-		return &OperationError{
-			Operation: "makeRequest",
-			Err:       fmt.Errorf("failed to decode response content: %w", err),
-		}
-	}
-
-	return nil
-}
-
-// Add Unwrap method to OperationError to enable proper error checking
-func (e *OperationError) Unwrap() error {
-	return e.Err
+	return retryWithBackoff(ctx, s.retryConfig, operation)
 }
