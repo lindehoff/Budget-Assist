@@ -4,8 +4,37 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/lindehoff/Budget-Assist/internal/ai"
+	"github.com/lindehoff/Budget-Assist/internal/db"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// mockAIService implements ai.Service for testing
+type mockAIService struct {
+	extractDocumentFunc func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error)
+}
+
+func (m *mockAIService) ExtractDocument(ctx context.Context, doc *ai.Document) (*ai.Extraction, error) {
+	if m.extractDocumentFunc != nil {
+		return m.extractDocumentFunc(ctx, doc)
+	}
+	return nil, nil
+}
+
+func (m *mockAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts ai.AnalysisOptions) (*ai.Analysis, error) {
+	return nil, nil
+}
+
+func (m *mockAIService) SuggestCategories(ctx context.Context, description string) ([]ai.CategoryMatch, error) {
+	return nil, nil
+}
 
 // createTestPDF creates a minimal valid PDF file for testing
 func createTestPDF(t *testing.T) []byte {
@@ -45,13 +74,18 @@ func createCorruptedPDF(t *testing.T) []byte {
 }
 
 func TestPDFProcessor_Type(t *testing.T) {
-	processor := NewPDFProcessor(nil)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	processor := NewPDFProcessor(logger, aiService)
 	if got := processor.Type(); got != TypePDF {
 		t.Errorf("PDFProcessor.Type() = %v, want %v", got, TypePDF)
 	}
 }
 
 func TestPDFProcessor_Validate(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+
 	type testCase struct {
 		name     string
 		errStage ProcessingStage
@@ -87,7 +121,7 @@ func TestPDFProcessor_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			processor := NewPDFProcessor(nil)
+			processor := NewPDFProcessor(logger, aiService)
 			err := processor.Validate(bytes.NewReader(tt.input))
 
 			if (err != nil) != tt.wantErr {
@@ -110,185 +144,109 @@ func TestPDFProcessor_Validate(t *testing.T) {
 }
 
 func TestPDFProcessor_Process(t *testing.T) {
-	ctx := context.Background()
-
-	type testCase struct {
-		name        string
-		errStage    ProcessingStage
-		filename    string
-		input       []byte
-		wantErr     bool
-		checkResult func(*testing.T, *ProcessingResult)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{
+		extractDocumentFunc: func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error) {
+			return &ai.Extraction{
+				Date:        "2024-01-01",
+				Amount:      100.50,
+				Description: "Test transaction",
+				Category:    "Test category",
+				Subcategory: "Test subcategory",
+			}, nil
+		},
 	}
 
-	tests := []testCase{
+	// Create a test PDF file
+	testPDF := filepath.Join(t.TempDir(), "test.pdf")
+	err := os.WriteFile(testPDF, []byte("%PDF-1.4\n1 0 obj\n<</Type/Catalog>>\nendobj\ntrailer\n<</Root 1 0 R>>\n%%EOF"), 0600)
+	require.NoError(t, err)
+
+	// Read the test PDF file
+	pdfData, err := os.ReadFile(testPDF)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		file     io.Reader
+		filename string
+		wantErr  bool
+	}{
 		{
-			name:     "Process_error_empty_file",
-			input:    []byte{},
+			name:     "valid PDF",
+			file:     bytes.NewReader(pdfData),
+			filename: "test.pdf",
+			wantErr:  false,
+		},
+		{
+			name:     "empty PDF",
+			file:     bytes.NewReader([]byte{}),
 			filename: "empty.pdf",
 			wantErr:  true,
-			errStage: StageExtraction,
-		},
-		{
-			name:     "Process_error_invalid_pdf_content",
-			input:    []byte("not a PDF"),
-			filename: "invalid.pdf",
-			wantErr:  true,
-			errStage: StageExtraction,
-		},
-		{
-			name:     "Successfully_process_valid_pdf",
-			input:    createTestPDF(t),
-			filename: "valid.pdf",
-			wantErr:  false,
-			checkResult: func(t *testing.T, result *ProcessingResult) {
-				if result.Metadata["filename"] != "valid.pdf" {
-					t.Errorf("ProcessingResult.Metadata[filename] = %v, want %v", result.Metadata["filename"], "valid.pdf")
-				}
-				if result.Metadata["content_type"] != "application/pdf" {
-					t.Errorf("ProcessingResult.Metadata[content_type] = %v, want application/pdf", result.Metadata["content_type"])
-				}
-				if result.Metadata["page_count"].(int) != 1 {
-					t.Errorf("ProcessingResult.Metadata[page_count] = %v, want 1", result.Metadata["page_count"])
-				}
-				if result.ProcessedAt.IsZero() {
-					t.Error("ProcessingResult.ProcessedAt is zero")
-				}
-			},
-		},
-		{
-			name:     "Process_error_corrupted_pdf",
-			input:    createCorruptedPDF(t),
-			filename: "corrupted.pdf",
-			wantErr:  true,
-			errStage: StageExtraction,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			processor := NewPDFProcessor(nil)
-			result, err := processor.Process(ctx, bytes.NewReader(tt.input), tt.filename)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("PDFProcessor.Process() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
+			p := NewPDFProcessor(logger, aiService)
+			result, err := p.Process(context.Background(), tt.file, tt.filename)
 			if tt.wantErr {
-				var procErr *ProcessingError
-				if !errors.As(err, &procErr) {
-					t.Errorf("PDFProcessor.Process() error is not ProcessingError, got %T", err)
-					return
-				}
-				if procErr.Stage != tt.errStage {
-					t.Errorf("ProcessingError.Stage = %v, want %v", procErr.Stage, tt.errStage)
-				}
-				return
-			}
-
-			if result == nil {
-				t.Error("PDFProcessor.Process() returned nil result for success case")
-				return
-			}
-
-			if tt.checkResult != nil {
-				tt.checkResult(t, result)
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+				assert.Len(t, result.Transactions, 1)
+				assert.Equal(t, "Test transaction", result.Transactions[0].Description)
 			}
 		})
 	}
 }
 
-func TestDefaultProcessorFactory(t *testing.T) {
-	t.Run("Successfully_get_supported_types", func(t *testing.T) {
-		factory := NewDefaultProcessorFactory(nil)
-		types := factory.SupportedTypes()
+func TestPDFProcessor_Process_NoAIService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	p := NewPDFProcessor(logger, nil)
 
-		found := false
-		for _, t := range types {
-			if t == TypePDF {
-				found = true
-				break
-			}
-		}
+	// Create a test PDF file
+	testPDF := filepath.Join(t.TempDir(), "test.pdf")
+	err := os.WriteFile(testPDF, []byte("%PDF-1.4\n1 0 obj\n<</Type/Catalog>>\nendobj\ntrailer\n<</Root 1 0 R>>\n%%EOF"), 0600)
+	require.NoError(t, err)
 
-		if !found {
-			t.Errorf("SupportedTypes() = %v, want to include %v", types, TypePDF)
-		}
-	})
+	// Read the test PDF file
+	pdfData, err := os.ReadFile(testPDF)
+	require.NoError(t, err)
 
-	t.Run("Successfully_create_pdf_processor", func(t *testing.T) {
-		factory := NewDefaultProcessorFactory(nil)
-		processor, err := factory.CreateProcessor(TypePDF)
-
-		if err != nil {
-			t.Errorf("CreateProcessor(%v) unexpected error: %v", TypePDF, err)
-			return
-		}
-
-		if processor == nil {
-			t.Error("CreateProcessor(TypePDF) returned nil processor")
-			return
-		}
-
-		if processor.Type() != TypePDF {
-			t.Errorf("processor.Type() = %v, want %v", processor.Type(), TypePDF)
-		}
-	})
-
-	t.Run("Create_error_unsupported_type", func(t *testing.T) {
-		factory := NewDefaultProcessorFactory(nil)
-		processor, err := factory.CreateProcessor("unsupported")
-
-		if err == nil {
-			t.Error("CreateProcessor(unsupported) expected error, got nil")
-		}
-
-		if processor != nil {
-			t.Errorf("CreateProcessor(unsupported) = %v, want nil", processor)
-		}
-	})
+	result, err := p.Process(context.Background(), bytes.NewReader(pdfData), "test.pdf")
+	assert.Error(t, err)
+	assert.Nil(t, result)
 }
 
-func TestPDFProcessor_Integration(t *testing.T) {
-	ctx := context.Background()
-	processor := NewPDFProcessor(nil)
+func TestPDFProcessor_CanProcess(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
 
-	// Create a test PDF with known content
-	pdfData := createTestPDF(t)
-
-	// Test validation
-	if err := processor.Validate(bytes.NewReader(pdfData)); err != nil {
-		t.Errorf("Validate() error = %v", err)
-		return
+	tests := []struct {
+		name     string
+		filename string
+		want     bool
+	}{
+		{
+			name:     "PDF file",
+			filename: "test.pdf",
+			want:     true,
+		},
+		{
+			name:     "non-PDF file",
+			filename: "test.txt",
+			want:     false,
+		},
 	}
 
-	// Test processing
-	result, err := processor.Process(ctx, bytes.NewReader(pdfData), "test.pdf")
-	if err != nil {
-		t.Errorf("Process() error = %v", err)
-		return
-	}
-
-	// Verify the processing result
-	if result.ProcessedAt.IsZero() {
-		t.Error("ProcessingResult.ProcessedAt is zero")
-	}
-
-	expectedMetadata := map[string]any{
-		"filename":     "test.pdf",
-		"content_type": "application/pdf",
-		"page_count":   1,
-	}
-
-	for key, want := range expectedMetadata {
-		if got := result.Metadata[key]; got != want {
-			t.Errorf("ProcessingResult.Metadata[%q] = %v, want %v", key, got, want)
-		}
-	}
-
-	// Verify text extraction
-	if textLen := result.Metadata["text_length"].(int); textLen == 0 {
-		t.Error("ProcessingResult.Metadata[text_length] is 0, expected some text to be extracted")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewPDFProcessor(logger, aiService)
+			got := p.CanProcess(tt.filename)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }

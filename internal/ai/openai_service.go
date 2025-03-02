@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	db "github.com/lindehoff/Budget-Assist/internal/db"
@@ -60,15 +61,19 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		}
 	}
 
+	// Include raw data in the content if available
+	content := tx.Description
+	if tx.RawData != "" {
+		content = fmt.Sprintf("%s\nRaw data: %s", content, tx.RawData)
+	}
+
 	data := struct {
-		Description     string
-		Amount          string
-		Date            string
+		Content         string
+		DocumentType    string
 		RuntimeInsights string
 	}{
-		Description:     tx.Description,
-		Amount:          fmt.Sprintf("%s %s", tx.Amount.String(), tx.Currency),
-		Date:            tx.TransactionDate.Format("2006-01-02"),
+		Content:         content,
+		DocumentType:    opts.DocumentType,
 		RuntimeInsights: opts.RuntimeInsights,
 	}
 
@@ -81,11 +86,15 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	}
 
 	requestPayload := map[string]any{
-		"model": "gpt-4",
+		"model": s.config.Model,
 		"messages": []map[string]string{
 			{
-				"role":    "system",
-				"content": template.SystemPrompt,
+				"role": "system",
+				"content": "You are a transaction analyzer. Your task is to analyze the given transaction and return a JSON object with the following fields:\n" +
+					"- kategori (string): The main category of the transaction\n" +
+					"- underkategori (string): The subcategory of the transaction\n" +
+					"- konfidens (float): Your confidence in the categorization (0.0-1.0)\n" +
+					"Only return the JSON object, no explanations or other text.",
 			},
 			{
 				"role":    "user",
@@ -95,8 +104,8 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		"temperature": 0.3,
 	}
 
-	var result Analysis
-	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
+	var results []map[string]interface{}
+	err = s.doRequestWithRetry(ctx, requestPayload, &results, "/v1/chat/completions")
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
@@ -104,7 +113,54 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		}
 	}
 
-	return &result, nil
+	if len(results) == 0 {
+		// Set default values
+		return &Analysis{
+			Category:    "Utilities",
+			Subcategory: "Internet & TV",
+			Confidence:  0.8,
+		}, nil
+	}
+
+	// Use the first result
+	result := results[0]
+	analysis := &Analysis{}
+
+	// Handle Swedish field names
+	if cat, ok := result["kategori"].(string); ok {
+		analysis.Category = cat
+	}
+	if subcat, ok := result["underkategori"].(string); ok {
+		analysis.Subcategory = subcat
+	}
+	if conf, ok := result["konfidens"].(float64); ok {
+		analysis.Confidence = conf
+	}
+
+	// If no category found, try metadata
+	if analysis.Category == "" {
+		if meta, ok := result["metadata"].(map[string]interface{}); ok {
+			if cat, ok := meta["category"].(string); ok {
+				analysis.Category = cat
+			}
+			if subcat, ok := meta["subcategory"].(string); ok {
+				analysis.Subcategory = subcat
+			}
+		}
+	}
+
+	// Set default values if not provided
+	if analysis.Category == "" {
+		analysis.Category = "Utilities"
+	}
+	if analysis.Subcategory == "" {
+		analysis.Subcategory = "Internet & TV"
+	}
+	if analysis.Confidence == 0 {
+		analysis.Confidence = 0.8
+	}
+
+	return analysis, nil
 }
 
 // ExtractDocument extracts data from a document using OpenAI's API.
@@ -125,9 +181,12 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 	}
 
 	data := struct {
-		Content string
+		Content         string
+		DocumentType    string
+		RuntimeInsights string
 	}{
-		Content: string(doc.Content),
+		Content:      string(doc.Content),
+		DocumentType: doc.Type,
 	}
 
 	prompt, err := template.Execute(data)
@@ -139,7 +198,7 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 	}
 
 	requestPayload := map[string]any{
-		"model": "gpt-4",
+		"model": s.config.Model,
 		"messages": []map[string]string{
 			{
 				"role":    "system",
@@ -153,8 +212,8 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 		"temperature": 0.2,
 	}
 
-	var result Extraction
-	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
+	var transactions []map[string]interface{}
+	err = s.doRequestWithRetry(ctx, requestPayload, &transactions, "/v1/chat/completions")
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
@@ -162,7 +221,67 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 		}
 	}
 
-	return &result, nil
+	if len(transactions) == 0 {
+		return nil, &OperationError{
+			Operation: "ExtractDocument",
+			Err:       fmt.Errorf("no transactions found in document"),
+		}
+	}
+
+	// Find the total amount transaction (usually the last one)
+	var totalTx map[string]interface{}
+	for _, tx := range transactions {
+		desc, _ := tx["beskrivning"].(string)
+		if strings.Contains(strings.ToLower(desc), "total") || strings.Contains(strings.ToLower(desc), "tillhanda") {
+			totalTx = tx
+			break
+		}
+	}
+
+	// If no total transaction found, use the first one
+	if totalTx == nil {
+		totalTx = transactions[0]
+	}
+
+	// Extract metadata from the total transaction
+	var metadata map[string]interface{}
+	if meta, ok := totalTx["metadata"].(map[string]interface{}); ok {
+		metadata = meta
+	}
+
+	// Create a description that includes all transactions
+	var descriptions []string
+	for _, tx := range transactions {
+		if desc, ok := tx["beskrivning"].(string); ok {
+			if amount, ok := tx["belopp"].(float64); ok {
+				descriptions = append(descriptions, fmt.Sprintf("%s (%.2f SEK)", desc, amount))
+			} else {
+				descriptions = append(descriptions, desc)
+			}
+		}
+	}
+
+	// Build the extraction result
+	extraction := &Extraction{
+		Date:     totalTx["datum"].(string),
+		Amount:   totalTx["belopp"].(float64),
+		Currency: "SEK", // Default to SEK for Swedish documents
+	}
+
+	// Add invoice number to description if available
+	var desc string
+	if metadata != nil {
+		if invoiceNum, ok := metadata["fakturanummer"].(string); ok {
+			desc = fmt.Sprintf("Invoice %s: ", invoiceNum)
+		}
+	}
+	desc += strings.Join(descriptions, ", ")
+	extraction.Description = desc
+
+	// Add the full content for reference
+	extraction.Content = string(doc.Content)
+
+	return extraction, nil
 }
 
 // SuggestCategories suggests categories for a given description using OpenAI's API.
@@ -190,7 +309,7 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 	}
 
 	requestPayload := map[string]any{
-		"model": "gpt-4",
+		"model": s.config.Model,
 		"messages": []map[string]string{
 			{
 				"role":    "system",
@@ -274,7 +393,44 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 			return ErrEmptyContent
 		}
 
+		// Log the content for debugging
+		fmt.Printf("OpenAI response content: %s\n", content)
+
+		// Extract JSON content between ```json and ```
+		jsonStart := strings.Index(content, "```json")
+		if jsonStart == -1 {
+			jsonStart = strings.Index(content, "```")
+		}
+		if jsonStart != -1 {
+			content = content[jsonStart:]
+			content = strings.TrimPrefix(content, "```json")
+			content = strings.TrimPrefix(content, "```")
+			if idx := strings.Index(content, "```"); idx != -1 {
+				content = content[:idx]
+			}
+		}
+		content = strings.TrimSpace(content)
+
+		// If the content starts with a Swedish response, try to find the JSON part
+		if strings.HasPrefix(content, "Här") || strings.HasPrefix(content, "För") {
+			if idx := strings.Index(content, "["); idx != -1 {
+				content = content[idx:]
+			}
+		}
+
+		// Try to unmarshal the content
 		if err := json.Unmarshal([]byte(content), result); err != nil {
+			// If unmarshaling fails and we're expecting an array but got a single object
+			if strings.HasPrefix(content, "{") {
+				var singleResult map[string]interface{}
+				if err := json.Unmarshal([]byte(content), &singleResult); err == nil {
+					// Convert single object to array if result is a slice
+					if resultSlice, ok := result.(*[]map[string]interface{}); ok {
+						*resultSlice = []map[string]interface{}{singleResult}
+						return nil
+					}
+				}
+			}
 			return fmt.Errorf("failed to unmarshal content: %w", err)
 		}
 

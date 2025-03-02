@@ -3,29 +3,33 @@ package docprocess
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/shopspring/decimal"
 )
 
-// PDFProcessor implements DocumentProcessor for PDF files
+// PDFProcessor implements the DocumentProcessor interface for PDF files
 type PDFProcessor struct {
-	logger *slog.Logger
+	logger    *slog.Logger
+	aiService ai.Service
 }
 
-// NewPDFProcessor creates a new PDFProcessor instance
-func NewPDFProcessor(logger *slog.Logger) *PDFProcessor {
-	if logger == nil {
-		logger = slog.Default()
-	}
+// NewPDFProcessor creates a new PDFProcessor
+func NewPDFProcessor(logger *slog.Logger, aiService ai.Service) *PDFProcessor {
 	return &PDFProcessor{
-		logger: logger,
+		logger:    logger,
+		aiService: aiService,
 	}
 }
 
@@ -59,110 +63,159 @@ func (p *PDFProcessor) Validate(file io.Reader) error {
 	return nil
 }
 
-// Process extracts text and potential transaction data from a PDF document
+// Process processes a PDF file and returns the extracted transactions
 func (p *PDFProcessor) Process(ctx context.Context, file io.Reader, filename string) (*ProcessingResult, error) {
-	// Convert io.Reader to []byte for pdfcpu
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(file); err != nil {
-		return nil, &ProcessingError{
-			Stage:    StageExtraction,
-			Document: filename,
-			Err:      fmt.Errorf("failed to read PDF: %w", err),
-		}
-	}
-
-	// Get page count
-	conf := model.NewDefaultConfiguration()
-	pageCount, err := api.PageCount(bytes.NewReader(buf.Bytes()), conf)
+	// Create a temporary file to store the PDF content
+	tempFile, err := os.CreateTemp("", "pdf-*.pdf")
 	if err != nil {
-		return nil, &ProcessingError{
-			Stage:    StageExtraction,
-			Document: filename,
-			Err:      fmt.Errorf("failed to get page count: %w", err),
-		}
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	// Copy the file content to the temp file
+	if _, err := io.Copy(tempFile, file); err != nil {
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	// Create a temporary directory for content extraction
-	tempDir, err := os.MkdirTemp("", "pdf-extract-*")
+	// Check if pdftotext is installed
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		return nil, fmt.Errorf("pdftotext is not installed. Please install poppler-utils")
+	}
+
+	// Extract text from PDF using pdftotext
+	args := []string{
+		"-layout",       // Maintain original layout
+		"-nopgbrk",      // Don't insert page breaks
+		tempFile.Name(), // Input file
+		"-",             // Output to stdout
+	}
+	cmd := exec.CommandContext(ctx, "pdftotext", args...)
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to extract text from PDF: %w", err)
+	}
+
+	text := buf.String()
+	if text == "" {
+		return nil, fmt.Errorf("no text content found in PDF")
+	}
+
+	p.logger.Info("extracted text content",
+		"filename", filename,
+		"text_length", len(text))
+
+	// Extract transactions using AI service
+	doc := &ai.Document{
+		Content: []byte(text),
+		Type:    "bill", // Default to bill type
+	}
+
+	extraction, err := p.aiService.ExtractDocument(ctx, doc)
 	if err != nil {
-		return nil, &ProcessingError{
-			Stage:    StageExtraction,
-			Document: filename,
-			Err:      fmt.Errorf("failed to create temp directory: %w", err),
-		}
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Extract content to temporary directory
-	extractErr := api.ExtractContent(bytes.NewReader(buf.Bytes()), tempDir, "content", nil, conf)
-	if extractErr != nil {
-		return nil, &ProcessingError{
-			Stage:    StageExtraction,
-			Document: filename,
-			Err:      fmt.Errorf("failed to extract content: %w", extractErr),
-		}
+		return nil, fmt.Errorf("failed to extract transactions: %w", err)
 	}
 
-	// Read extracted content
-	textBuf := new(bytes.Buffer)
-	contentFiles, err := filepath.Glob(filepath.Join(tempDir, "*.txt"))
-	if err != nil {
-		return nil, &ProcessingError{
-			Stage:    StageExtraction,
-			Document: filename,
-			Err:      fmt.Errorf("failed to find extracted content: %w", err),
+	// Convert AI extraction to transactions
+	var transactions []Transaction
+	if extraction != nil {
+		// Parse the description to get individual transactions
+		parts := strings.Split(extraction.Description, ", ")
+		for _, part := range parts {
+			// Skip empty parts
+			if part == "" {
+				continue
+			}
+
+			// Extract amount from description (e.g., "Bredband 600/50 (629.00 SEK)")
+			var amount decimal.Decimal
+			var description string
+			if strings.Contains(part, " (") && strings.HasSuffix(part, " SEK)") {
+				descParts := strings.Split(part, " (")
+				description = descParts[0]
+				amountStr := strings.TrimSuffix(descParts[1], " SEK)")
+				if amt, err := decimal.NewFromString(amountStr); err == nil {
+					amount = amt
+				} else {
+					amount = decimal.NewFromFloat(extraction.Amount)
+				}
+			} else {
+				description = part
+				amount = decimal.NewFromFloat(extraction.Amount)
+			}
+
+			// Parse the date
+			var date time.Time
+			if extraction.Date != "" {
+				date, err = time.Parse("2006-01-02", extraction.Date)
+				if err != nil {
+					p.logger.Error("failed to parse date",
+						"date", extraction.Date,
+						"error", err)
+					continue
+				}
+			}
+
+			if !date.IsZero() {
+				// Convert extraction to map for RawData
+				rawData := make(map[string]any)
+				if data, err := json.Marshal(extraction); err == nil {
+					if err := json.Unmarshal(data, &rawData); err != nil {
+						p.logger.Error("failed to convert extraction to map",
+							"error", err)
+					}
+				}
+
+				tx := Transaction{
+					Description: description,
+					Amount:      amount,
+					Date:        date,
+					RawData:     rawData,
+					Category:    extraction.Category,
+					SubCategory: extraction.Subcategory,
+					Source:      "pdf",
+				}
+				transactions = append(transactions, tx)
+			} else {
+				p.logger.Warn("skipping transaction due to invalid date",
+					"description", description,
+					"amount", amount)
+			}
 		}
 	}
 
-	for _, file := range contentFiles {
-		content, err := os.ReadFile(file)
-		if err != nil {
-			p.logger.Warn("failed to read content file",
-				"file", file,
-				"error", err)
-			continue
-		}
-		textBuf.Write(content)
-	}
-
-	// Create processing result with metadata
-	result := &ProcessingResult{
-		Transactions: make([]Transaction, 0),
+	return &ProcessingResult{
+		Transactions: transactions,
 		Metadata: map[string]any{
 			"filename":     filename,
 			"content_type": "application/pdf",
-			"text_length":  textBuf.Len(),
-			"page_count":   pageCount,
+			"text_length":  len(text),
 		},
 		Warnings:    make([]string, 0),
 		ProcessedAt: time.Now(),
-	}
+	}, nil
+}
 
-	// TODO: Implement transaction extraction logic
-	// This will involve:
-	// 1. Pattern matching for transaction data
-	// 2. Date and amount extraction
-	// 3. Category inference
-	// 4. Data normalization
-
-	p.logger.Info("processed PDF document",
-		"filename", filename,
-		"text_length", textBuf.Len(),
-		"page_count", pageCount,
-		"transactions_found", len(result.Transactions))
-
-	return result, nil
+// CanProcess returns true if the file is a PDF
+func (p *PDFProcessor) CanProcess(filePath string) bool {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	return ext == ".pdf"
 }
 
 // DefaultProcessorFactory implements ProcessorFactory
 type DefaultProcessorFactory struct {
-	logger *slog.Logger
+	logger    *slog.Logger
+	aiService ai.Service
 }
 
 // NewDefaultProcessorFactory creates a new processor factory
-func NewDefaultProcessorFactory(logger *slog.Logger) *DefaultProcessorFactory {
+func NewDefaultProcessorFactory(logger *slog.Logger, aiService ai.Service) *DefaultProcessorFactory {
 	return &DefaultProcessorFactory{
-		logger: logger,
+		logger:    logger,
+		aiService: aiService,
 	}
 }
 
@@ -170,7 +223,7 @@ func NewDefaultProcessorFactory(logger *slog.Logger) *DefaultProcessorFactory {
 func (f *DefaultProcessorFactory) CreateProcessor(docType DocumentType) (DocumentProcessor, error) {
 	switch docType {
 	case TypePDF:
-		return NewPDFProcessor(f.logger), nil
+		return NewPDFProcessor(f.logger, f.aiService), nil
 	default:
 		return nil, fmt.Errorf("unsupported document type: %s", docType)
 	}

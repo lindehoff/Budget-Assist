@@ -34,6 +34,7 @@ func getAIService() (ai.Service, error) {
 	config := ai.Config{
 		BaseURL:        "https://api.openai.com",
 		APIKey:         viper.GetString("ai.api_key"),
+		Model:          viper.GetString("ai.model"),
 		RequestTimeout: viper.GetDuration("ai.timeout"),
 		MaxRetries:     3,
 	}

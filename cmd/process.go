@@ -66,19 +66,20 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		// Get OpenAI config from environment or config file
 		apiKey := os.Getenv("OPENAI_API_KEY")
 		if apiKey == "" {
-			apiKey = viper.GetString("openai.api_key")
+			apiKey = viper.GetString("ai.api_key")
 		}
 
 		aiConfig := ai.Config{
-			BaseURL:        viper.GetString("openai.base_url"),
+			BaseURL:        viper.GetString("ai.base_url"),
 			APIKey:         apiKey,
-			RequestTimeout: viper.GetDuration("openai.request_timeout"),
-			MaxRetries:     viper.GetInt("openai.max_retries"),
+			Model:          viper.GetString("ai.model"),
+			RequestTimeout: viper.GetDuration("ai.timeout"),
+			MaxRetries:     viper.GetInt("ai.max_retries"),
 		}
 
 		// Set defaults if not configured
 		if aiConfig.BaseURL == "" {
-			aiConfig.BaseURL = "https://api.openai.com/v1"
+			aiConfig.BaseURL = "https://api.openai.com"
 		}
 		if aiConfig.RequestTimeout == 0 {
 			aiConfig.RequestTimeout = 30 * time.Second
@@ -88,7 +89,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		}
 
 		if aiConfig.APIKey == "" {
-			return fmt.Errorf("OpenAI API key not found in environment variable OPENAI_API_KEY or config file (openai.api_key)")
+			return fmt.Errorf("OpenAI API key not found in environment variable OPENAI_API_KEY or config file (ai.api_key)")
 		}
 
 		// Initialize AI service
@@ -96,7 +97,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize processors
-	pdfProcessor := docprocess.NewPDFProcessor(logger)
+	pdfProcessor := docprocess.NewPDFProcessor(logger, aiService)
 	csvProcessor := processor.NewSEBProcessor(logger)
 
 	// Get insights from flags
