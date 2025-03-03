@@ -48,6 +48,10 @@ func NewOpenAIService(config Config, store db.Store, logger *slog.Logger) *OpenA
 
 // AnalyzeTransaction analyzes a transaction using OpenAI's API.
 func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts AnalysisOptions) (*Analysis, error) {
+	s.logger.Info("Starting transaction analysis",
+		"transaction_id", tx.ID,
+		"document_type", opts.DocumentType)
+
 	var promptType db.PromptType
 	switch opts.DocumentType {
 	case "bill":
@@ -57,14 +61,25 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	case "bank_statement":
 		promptType = db.BankStatementAnalysisPrompt
 	default:
+		s.logger.Error("Unsupported document type for analysis",
+			"document_type", opts.DocumentType,
+			"transaction_id", tx.ID)
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       fmt.Errorf("unsupported document type: %s", opts.DocumentType),
 		}
 	}
 
+	s.logger.Debug("Retrieving prompt template for analysis",
+		"prompt_type", promptType,
+		"transaction_id", tx.ID)
+
 	template, err := s.promptMgr.GetPrompt(ctx, promptType)
 	if err != nil {
+		s.logger.Error("Failed to retrieve prompt template",
+			"error", err,
+			"prompt_type", promptType,
+			"transaction_id", tx.ID)
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       err,
@@ -74,6 +89,9 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	// Include raw data in the content if available
 	content := tx.Description
 	if tx.RawData != "" {
+		s.logger.Debug("Including raw data in analysis content",
+			"transaction_id", tx.ID,
+			"raw_data_length", len(tx.RawData))
 		content = fmt.Sprintf("%s\nRaw data: %s", content, tx.RawData)
 	}
 
@@ -87,11 +105,32 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		RuntimeInsights: opts.RuntimeInsights,
 	}
 
-	prompt, err := template.Execute(data)
+	s.logger.Debug("Executing prompt templates",
+		"transaction_id", tx.ID,
+		"content_length", len(content),
+		"has_runtime_insights", opts.RuntimeInsights != "")
+
+	// Execute the template to get the user prompt
+	userPrompt, err := executeTemplate(template.UserPrompt, data)
 	if err != nil {
+		s.logger.Error("Failed to execute user prompt template",
+			"error", err,
+			"transaction_id", tx.ID)
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
-			Err:       fmt.Errorf("failed to execute template: %w", err),
+			Err:       fmt.Errorf("failed to execute user prompt template: %w", err),
+		}
+	}
+
+	// Execute the template to get the system prompt
+	systemPrompt, err := executeTemplate(template.SystemPrompt, data)
+	if err != nil {
+		s.logger.Error("Failed to execute system prompt template",
+			"error", err,
+			"transaction_id", tx.ID)
+		return nil, &OperationError{
+			Operation: "AnalyzeTransaction",
+			Err:       fmt.Errorf("failed to execute system prompt template: %w", err),
 		}
 	}
 
@@ -99,16 +138,12 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		"model": s.config.Model,
 		"messages": []map[string]string{
 			{
-				"role": "system",
-				"content": "You are a transaction analyzer. Your task is to analyze the given transaction and return a JSON object with the following fields:\n" +
-					"- category: The main category of the transaction\n" +
-					"- subcategory: The subcategory of the transaction\n" +
-					"- confidence: Your confidence in the categorization (0.0-1.0)\n" +
-					"- metadata: Any additional metadata extracted from the transaction\n",
+				"role":    "system",
+				"content": systemPrompt,
 			},
 			{
 				"role":    "user",
-				"content": prompt,
+				"content": userPrompt,
 			},
 		},
 		"temperature": 0.3,
@@ -116,12 +151,17 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 
 	s.logger.Debug("Sending transaction analysis request",
 		"model", s.config.Model,
-		"content_length", len(prompt))
+		"transaction_id", tx.ID,
+		"user_prompt_length", len(userPrompt),
+		"system_prompt_length", len(systemPrompt))
 
 	var response ChatCompletionResponse
 	err = s.doRequestWithRetry(ctx, requestPayload, &response, "/v1/chat/completions")
 	if err != nil {
-		s.logger.Error("OpenAI API request failed", "error", err)
+		s.logger.Error("OpenAI API request failed",
+			"error", err,
+			"transaction_id", tx.ID,
+			"model", s.config.Model)
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       fmt.Errorf("failed to make API request: %w", err),
@@ -129,6 +169,8 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	}
 
 	if len(response.Choices) == 0 {
+		s.logger.Error("No content in API response",
+			"transaction_id", tx.ID)
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       fmt.Errorf("no content in response"),
@@ -136,11 +178,19 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	}
 
 	content = response.Choices[0].Message.Content
+	s.logger.Debug("Received API response content",
+		"transaction_id", tx.ID,
+		"content_length", len(content),
+		"choices_count", len(response.Choices))
 
 	// Try to parse as a single JSON object
 	var analysisData map[string]interface{}
 	err = json.Unmarshal([]byte(content), &analysisData)
 	if err != nil {
+		s.logger.Error("Failed to parse API response as JSON",
+			"error", err,
+			"transaction_id", tx.ID,
+			"content_preview", truncateString(content, 100))
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
 			Err:       fmt.Errorf("failed to parse response: %w", err),
@@ -187,17 +237,48 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 
 	// If still no category, set defaults
 	if analysis.Category == "" {
+		s.logger.Warn("No category found in response, using defaults",
+			"transaction_id", tx.ID,
+			"response_keys", getMapKeys(analysisData))
 		analysis.Category = "Utilities"
 		analysis.Subcategory = "Internet & TV"
 		analysis.Confidence = 0.8
 	}
 
+	s.logger.Info("Transaction analysis completed successfully",
+		"transaction_id", tx.ID,
+		"category", analysis.Category,
+		"subcategory", analysis.Subcategory,
+		"confidence", analysis.Confidence)
+
 	return analysis, nil
+}
+
+// Helper function to truncate a string for logging
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// Helper function to get map keys for logging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // ExtractDocument extracts information from a document using OpenAI's API
 func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Extraction, error) {
+	s.logger.Info("Starting document extraction",
+		"document_type", doc.Type,
+		"content_length", len(doc.Content))
+
 	if len(doc.Content) == 0 {
+		s.logger.Error("Empty document content provided for extraction")
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
 			Err:       fmt.Errorf("empty document content"),
@@ -205,15 +286,26 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 	}
 
 	// Get the prompt template and prepare the request
+	s.logger.Debug("Retrieving document analysis prompt template")
 	template, err := s.promptMgr.GetPrompt(ctx, db.BillAnalysisPrompt)
 	if err != nil {
+		s.logger.Error("Failed to retrieve document analysis prompt template",
+			"error", err)
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
 			Err:       err,
 		}
 	}
 
+	s.logger.Debug("Retrieved document analysis prompt template",
+		"template_version", template.Version)
+
 	// Prepare the data for the prompt
+	contentPreview := truncateString(string(doc.Content), 100)
+	s.logger.Debug("Preparing document content for prompt",
+		"content_preview", contentPreview,
+		"document_type", doc.Type)
+
 	data := struct {
 		Content      string
 		DocumentType string
@@ -222,37 +314,81 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 		DocumentType: doc.Type,
 	}
 
-	// Execute the template
-	prompt, err := template.Execute(data)
+	// Execute the user prompt template
+	s.logger.Debug("Executing user prompt template")
+	userPrompt, err := executeTemplate(template.UserPrompt, data)
 	if err != nil {
+		s.logger.Error("Failed to execute user prompt template",
+			"error", err)
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
-			Err:       fmt.Errorf("failed to generate prompt: %w", err),
+			Err:       fmt.Errorf("failed to execute user prompt template: %w", err),
 		}
 	}
+
+	s.logger.Debug("User prompt template executed successfully",
+		"prompt_length", len(userPrompt))
+
+	// Execute the system prompt template
+	s.logger.Debug("Executing system prompt template")
+	systemPrompt, err := executeTemplate(template.SystemPrompt, data)
+	if err != nil {
+		s.logger.Error("Failed to execute system prompt template",
+			"error", err)
+		return nil, &OperationError{
+			Operation: "ExtractDocument",
+			Err:       fmt.Errorf("failed to execute system prompt template: %w", err),
+		}
+	}
+
+	s.logger.Debug("System prompt template executed successfully",
+		"prompt_length", len(systemPrompt))
 
 	// Make the API request
-	response, err := s.makeExtractDocumentRequest(ctx, template.SystemPrompt, prompt)
+	s.logger.Debug("Making document extraction API request")
+	response, err := s.makeExtractDocumentRequest(ctx, systemPrompt, userPrompt)
 	if err != nil {
+		s.logger.Error("Document extraction API request failed",
+			"error", err)
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
 			Err:       err,
 		}
 	}
 
+	s.logger.Debug("Received document extraction API response",
+		"response_length", len(response))
+
 	// Process the response
+	s.logger.Debug("Processing document extraction response")
 	extraction, err := s.processExtractDocumentResponse(response, doc.Content)
 	if err != nil {
+		s.logger.Error("Failed to process document extraction response",
+			"error", err,
+			"response_preview", truncateString(response, 100))
 		return nil, &OperationError{
 			Operation: "ExtractDocument",
 			Err:       err,
 		}
 	}
+
+	// Log extraction details
+	s.logger.Debug("Document extraction details",
+		"date", extraction.Date,
+		"amount", extraction.Amount,
+		"currency", extraction.Currency,
+		"description_length", len(extraction.Description),
+		"category", extraction.Category,
+		"subcategory", extraction.Subcategory)
 
 	// In test mode, set Content to empty string to match test expectations
 	if s.config.BaseURL == DefaultOpenAIBaseURL && strings.HasPrefix(s.config.APIKey, "test-") {
+		s.logger.Debug("Test mode detected, clearing extraction content")
 		extraction.Content = ""
 	}
+
+	s.logger.Info("Document extraction completed successfully",
+		"document_type", doc.Type)
 
 	return extraction, nil
 }
@@ -369,11 +505,11 @@ func (s *OpenAIService) processTransactionsResponse(content string, docContent [
 		}
 	}
 
-	// Add invoice number to description if available
+	// Add bill number to description if available
 	var desc string
 	if metadata != nil {
-		if invoiceNum, ok := metadata["fakturanummer"].(string); ok {
-			desc = fmt.Sprintf("Invoice %s: ", invoiceNum)
+		if billNum, ok := metadata["fakturanummer"].(string); ok {
+			desc = fmt.Sprintf("bill %s: ", billNum)
 		}
 	}
 	desc += strings.Join(descriptions, ", ")
@@ -419,35 +555,78 @@ func (s *OpenAIService) processSingleObjectResponse(extractionData map[string]in
 
 // SuggestCategories suggests categories for a transaction description
 func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error) {
+	s.logger.Info("Starting category suggestion",
+		"description_length", len(desc),
+		"description_preview", truncateString(desc, 50))
+
 	// Get the prompt template
+	s.logger.Debug("Retrieving categorization prompt template")
 	template, err := s.promptMgr.GetPrompt(ctx, db.TransactionCategorizationPrompt)
 	if err != nil {
+		s.logger.Error("Failed to retrieve categorization prompt template",
+			"error", err)
 		return nil, &OperationError{
 			Operation: "SuggestCategories",
 			Err:       err,
 		}
 	}
 
+	s.logger.Debug("Retrieved categorization prompt template",
+		"template_version", template.Version)
+
 	// Get category information
+	s.logger.Debug("Retrieving category information from database")
 	categoryInfos, err := s.getCategoryInfos(ctx)
 	if err != nil {
+		s.logger.Error("Failed to retrieve category information",
+			"error", err)
 		return nil, err
 	}
+
+	s.logger.Debug("Retrieved category information",
+		"category_count", len(categoryInfos))
 
 	// Generate the prompt
+	s.logger.Debug("Generating category suggestion prompt")
 	prompt, err := s.generateCategoryPrompt(template, desc, categoryInfos)
 	if err != nil {
+		s.logger.Error("Failed to generate category prompt",
+			"error", err)
 		return nil, err
 	}
+
+	s.logger.Debug("Generated category prompt",
+		"prompt_length", len(prompt))
 
 	// Make the API request
+	s.logger.Debug("Making category suggestion API request")
 	rawResults, err := s.makeCategoryRequest(ctx, template.SystemPrompt, prompt)
 	if err != nil {
+		s.logger.Error("Category suggestion API request failed",
+			"error", err)
 		return nil, err
 	}
 
+	s.logger.Debug("Received raw category suggestion results",
+		"result_count", len(rawResults))
+
 	// Process the results
-	return s.processCategoryResults(rawResults), nil
+	matches := s.processCategoryResults(rawResults)
+
+	s.logger.Info("Category suggestion completed",
+		"match_count", len(matches),
+		"description_preview", truncateString(desc, 50))
+
+	if len(matches) > 0 {
+		s.logger.Debug("Top category match",
+			"category", matches[0].Category,
+			"confidence", matches[0].Confidence)
+	} else {
+		s.logger.Warn("No category matches found",
+			"description_preview", truncateString(desc, 50))
+	}
+
+	return matches, nil
 }
 
 // getCategoryInfos retrieves and processes category information from the database
@@ -556,11 +735,12 @@ func (s *OpenAIService) generateCategoryPrompt(template *PromptTemplate, desc st
 		Categories:  categoryInfos,
 	}
 
-	prompt, err := template.Execute(data)
+	// Execute the user prompt template
+	userPrompt, err := executeTemplate(template.UserPrompt, data)
 	if err != nil {
 		return "", &OperationError{
 			Operation: "SuggestCategories",
-			Err:       fmt.Errorf("failed to generate prompt: %w", err),
+			Err:       fmt.Errorf("failed to execute user prompt template: %w", err),
 		}
 	}
 
@@ -569,11 +749,11 @@ func (s *OpenAIService) generateCategoryPrompt(template *PromptTemplate, desc st
 		s.logger.Debug("Generated prompt",
 			"description", desc,
 			"system_prompt", template.SystemPrompt,
-			"user_prompt", prompt,
+			"user_prompt", userPrompt,
 			"available_categories", len(categoryInfos))
 	}
 
-	return prompt, nil
+	return userPrompt, nil
 }
 
 // makeCategoryRequest makes the API request for category suggestion
@@ -675,23 +855,35 @@ func (s *OpenAIService) processCategoryResults(rawResults []map[string]interface
 
 // doRequestWithRetry sends a request to the OpenAI API with retry logic
 func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload map[string]any, result interface{}, endpoint string) error {
+	s.logger.Debug("Starting API request with retry logic",
+		"endpoint", endpoint,
+		"model", requestPayload["model"],
+		"max_retries", s.retryConfig.MaxRetries)
+
 	operation := func() error {
 		if err := s.rateLimiter.Wait(ctx); err != nil {
-			s.logger.Error("Rate limiter wait failed", "error", err)
+			s.logger.Error("Rate limiter wait failed",
+				"error", err,
+				"endpoint", endpoint)
 			return err
 		}
 
 		// Marshal the request payload
 		requestBody, err := json.Marshal(requestPayload)
 		if err != nil {
-			s.logger.Error("Failed to marshal request", "error", err)
+			s.logger.Error("Failed to marshal request",
+				"error", err,
+				"endpoint", endpoint)
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
 		// Create the request
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.BaseURL+endpoint, bytes.NewReader(requestBody))
 		if err != nil {
-			s.logger.Error("Failed to create request", "error", err, "url", s.config.BaseURL+endpoint)
+			s.logger.Error("Failed to create request",
+				"error", err,
+				"url", s.config.BaseURL+endpoint,
+				"endpoint", endpoint)
 			return fmt.Errorf("failed to create request: %w", err)
 		}
 
@@ -701,12 +893,19 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 		s.logger.Debug("Sending API request",
 			"endpoint", endpoint,
 			"model", requestPayload["model"],
-			"request_size", len(requestBody))
+			"request_size", len(requestBody),
+			"url", s.config.BaseURL+endpoint)
 
 		// Send the request
+		startTime := time.Now()
 		resp, err := s.client.Do(req)
+		requestDuration := time.Since(startTime)
+
 		if err != nil {
-			s.logger.Error("Failed to send request", "error", err, "endpoint", endpoint)
+			s.logger.Error("Failed to send request",
+				"error", err,
+				"endpoint", endpoint,
+				"duration_ms", requestDuration.Milliseconds())
 			return fmt.Errorf("failed to send request: %w", err)
 		}
 		defer resp.Body.Close() // Ensure body is closed
@@ -714,51 +913,110 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 		// Read the response body
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			s.logger.Error("Failed to read response", "error", err)
+			s.logger.Error("Failed to read response",
+				"error", err,
+				"endpoint", endpoint,
+				"status_code", resp.StatusCode)
 			return fmt.Errorf("failed to read response: %w", err)
 		}
 
 		s.logger.Debug("Received API response",
 			"status_code", resp.StatusCode,
-			"content_length", len(body))
+			"content_length", len(body),
+			"duration_ms", requestDuration.Milliseconds(),
+			"endpoint", endpoint)
 
 		// Handle non-200 responses
 		if resp.StatusCode != http.StatusOK {
+			s.logger.Warn("API returned non-200 status code",
+				"status_code", resp.StatusCode,
+				"endpoint", endpoint,
+				"duration_ms", requestDuration.Milliseconds())
 			return s.handleErrorResponse(resp, body)
 		}
 
 		// Check if we're in a test environment by looking at the BaseURL
 		// In tests, we use a mock client that returns the expected result directly
 		if s.config.BaseURL == DefaultOpenAIBaseURL && strings.HasPrefix(s.config.APIKey, "test-") {
+			s.logger.Debug("Using test environment direct response parsing",
+				"endpoint", endpoint)
 			// In test environment, try to unmarshal directly into the result
 			if err := json.Unmarshal(body, result); err == nil {
 				return nil
 			}
 			// If direct unmarshal fails, fall back to normal parsing
+			s.logger.Debug("Direct unmarshal failed in test environment, falling back to normal parsing",
+				"endpoint", endpoint)
 		}
 
 		// Parse the response
-		return s.parseResponse(body, result)
+		if err := s.parseResponse(body, result); err != nil {
+			s.logger.Error("Failed to parse API response",
+				"error", err,
+				"endpoint", endpoint,
+				"content_preview", truncateString(string(body), 100))
+			return err
+		}
+
+		s.logger.Info("API request completed successfully",
+			"endpoint", endpoint,
+			"model", requestPayload["model"],
+			"duration_ms", requestDuration.Milliseconds())
+		return nil
 	}
 
-	return retryWithBackoff(ctx, s.retryConfig, operation)
+	err := retryWithBackoff(ctx, s.retryConfig, operation)
+	if err != nil {
+		s.logger.Error("API request failed after retries",
+			"error", err,
+			"endpoint", endpoint,
+			"max_retries", s.retryConfig.MaxRetries)
+	}
+	return err
 }
 
 // handleErrorResponse processes non-200 responses from the API
 func (s *OpenAIService) handleErrorResponse(resp *http.Response, body []byte) error {
+	errorMsg := string(body)
 	s.logger.Error("API request failed",
 		"status_code", resp.StatusCode,
-		"response", string(body))
+		"response", truncateString(errorMsg, 200))
 
 	if resp.StatusCode == http.StatusTooManyRequests {
+		s.logger.Warn("Rate limit exceeded, will retry with backoff",
+			"status_code", resp.StatusCode)
 		return &RateLimitError{
-			Message:    string(body),
+			Message:    errorMsg,
 			StatusCode: resp.StatusCode,
 		}
 	}
+
+	// Log different error types with appropriate levels
+	switch resp.StatusCode {
+	case http.StatusBadRequest:
+		s.logger.Error("Bad request error from API",
+			"status_code", resp.StatusCode,
+			"response", truncateString(errorMsg, 200))
+	case http.StatusUnauthorized:
+		s.logger.Error("Authentication error from API",
+			"status_code", resp.StatusCode)
+	case http.StatusForbidden:
+		s.logger.Error("Permission denied by API",
+			"status_code", resp.StatusCode)
+	case http.StatusNotFound:
+		s.logger.Error("Resource not found on API",
+			"status_code", resp.StatusCode,
+			"response", truncateString(errorMsg, 200))
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable:
+		s.logger.Warn("API server error, may retry",
+			"status_code", resp.StatusCode)
+	}
+
 	return &OpenAIError{
 		Operation:  "API request",
-		Message:    string(body),
+		Message:    errorMsg,
 		StatusCode: resp.StatusCode,
 	}
 }
@@ -845,4 +1103,9 @@ func (s *OpenAIService) handleUnmarshalError(content string, result interface{},
 		}
 	}
 	return fmt.Errorf("failed to unmarshal content: %w", err)
+}
+
+// Helper function to execute a template with data
+func executeTemplate(templateText string, data interface{}) (string, error) {
+	return ExecuteTemplate(templateText, data)
 }

@@ -36,35 +36,17 @@ func (pt *PromptTemplate) Validate() error {
 	return nil
 }
 
-// Execute generates the final prompt string with the given data
-func (pt *PromptTemplate) Execute(data any) (string, error) {
-	// First validate the template
-	if err := pt.Validate(); err != nil {
-		return "", fmt.Errorf("invalid template: %w", err)
-	}
-
-	// Parse and execute the system prompt
-	systemTmpl, err := template.New("system").Parse(pt.SystemPrompt)
+// ExecuteTemplate executes a template with the provided data and returns the result
+func ExecuteTemplate(templateText string, data interface{}) (string, error) {
+	tmpl, err := template.New("prompt").Parse(templateText)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse system prompt template: %w", err)
+		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	var systemBuf bytes.Buffer
-	if err := systemTmpl.Execute(&systemBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute system prompt: %w", err)
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	// Parse and execute the user prompt
-	userTmpl, err := template.New("user").Parse(pt.UserPrompt)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse user prompt template: %w", err)
-	}
-
-	var userBuf bytes.Buffer
-	if err := userTmpl.Execute(&userBuf, data); err != nil {
-		return "", fmt.Errorf("failed to execute user prompt: %w", err)
-	}
-
-	// Combine the prompts
-	return fmt.Sprintf("System: %s\n\nUser: %s", systemBuf.String(), userBuf.String()), nil
+	return buf.String(), nil
 }

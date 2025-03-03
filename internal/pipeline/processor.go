@@ -18,7 +18,7 @@ import (
 
 // ProcessOptions contains runtime options for document processing
 type ProcessOptions struct {
-	// DocumentType specifies the type of document being processed (e.g., "receipt", "bank_statement", "invoice")
+	// DocumentType specifies the type of document being processed (e.g., "receipt", "bank_statement", "bill")
 	DocumentType string
 	// TransactionInsights provides additional context about the transactions in the document
 	TransactionInsights string
