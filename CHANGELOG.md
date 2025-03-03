@@ -1,5 +1,103 @@
 # Budget-Assist Changelog
 
+## 2.10.0 (2025-03-03)
+
+* Merge pull request #25 from lindehoff/Refactor-make-it-work ([](https://github.com/lindehoff/Budget-Assist/commit/bda7b300bc579713d58a01daad19c36dc9d483da))
+  Refactor make it work
+* **ai:** Refactor AI service and enhance transaction analysis capabilities 🤖✨ ([](https://github.com/lindehoff/Budget-Assist/commit/de84eb7bb7f7fe9821c3304aed7d6f06edd98f12))
+  - Update OpenAI configuration to use new keys for API settings 🔑
+- Include model selection in AI service configuration 🛠️
+- Enhance AnalyzeTransaction to include raw data in analysis 📊
+- Improve error handling and default values for transaction analysis ⚠️
+- Refactor ExtractDocument to handle multiple transactions and metadata 📄
+- Update SuggestCategories to utilize dynamic model selection 🔄
+- Add logging for OpenAI response content for better debugging 📝
+- Ensure JSON extraction from OpenAI responses is robust and reliable 🔍
+* **ai:** Refactor OpenAI service for improved response handling and defaults 🤖 ([](https://github.com/lindehoff/Budget-Assist/commit/5ba1abe3ccd6120f7850306e67437f83f19d1c1a))
+  - Introduce constants for OpenAI API base URL and default model 🔧
+- Update AnalyzeTransaction to handle response parsing more robustly 📊
+- Enhance error handling for empty responses and parsing failures ⚠️
+- Refactor ExtractDocument to streamline API requests and response processing 📄
+- Implement separate functions for processing single and multiple transaction responses 🔍
+- Adjust SuggestCategories to handle various response formats effectively 🔄
+- Update tests to reflect changes in prompt structure and expected outputs 🧪# Please enter the commit message for your changes. Lines starting
+* **ai:** refactor OpenAIService and improve test coverage ([](https://github.com/lindehoff/Budget-Assist/commit/9fb7a71c985e585982cac893361ae75db5ad30e7))
+  - Add comprehensive tests for AnalyzeTransaction, ExtractDocument, and SuggestCategories
+- Update Config struct to use time.Duration for RequestTimeout and add MaxRetries field
+- Add Content field to Extraction struct for document content handling
+- Update error handling to use custom OperationError type with improved context
+- Remove RateLimiter and retryWithBackoff functions to simplify codebase
+- Update PromptManager to use db.PromptType for better type safety
+- Add test cases for different scenarios including error cases and edge conditions
+* **cmd:** add TypeName flag to category add command 🚀 ([](https://github.com/lindehoff/Budget-Assist/commit/4a7ba51c020ad0ccdabe4c47e7b6ddbd9a2b6e57))
+  - Introduced `TypeName` flag in `categoryAddCmd` for enhanced category management.
+- Updated `CreateCategoryRequest` struct to include a new `Type` field for better categorization.
+- Removed translation prompt logic from the category add command for cleaner implementation.
+
+refactor(category): update category and subcategory linking methods 🛠️
+
+- Changed `Subcategories` field in `CreateCategoryRequest` to accept names instead of IDs.
+- Updated `Categories` field in `CreateSubcategoryRequest` to accept names instead of IDs.
+- Added `Tags` field in `CreateSubcategoryRequest` to facilitate tag attachment.
+
+feat(db): enhance category and subcategory management 🗃
+
+- Added methods to retrieve categories and subcategories by name.
+- Implemented methods for creating, linking, and unlinking tags.
+- Simplified `ImportDefaultCategories` function for improved readability.
+
+test: update tests for category and subcategory changes 🔧
+
+- Modified tests to reflect changes in `createTestCategory` and `createTestCategoryType`.
+- Removed unnecessary translation object creation in test cases.
+* **cmd:** Enhance category management with logging and error handling 📂🔍 ([](https://github.com/lindehoff/Budget-Assist/commit/daddfbbfc5f8884742d8e396a6700f7ba6a5e5db))
+  - Add debug logging for category commands to improve traceability 📝
+- Implement error logging for failed category and subcategory operations ⚠️
+- Update category import functionality with detailed logging for better insights 📥
+- Ensure parent command's PersistentPreRun is called for consistency 🔗
+- Improve error messages to provide more context on failures 🛠️
+- Log successful operations for categories and subcategories for auditing ✅
+* **db:** Enhance database operations and prompt management 📦 ([](https://github.com/lindehoff/Budget-Assist/commit/562004b0e8cba8d6465af9fca50ba4c04d83d308))
+  - Import db package in prompt.go for improved database handling
+- Update prompt commands to utilize db package for error handling and operations
+- Refactor PromptManager to use db.PromptType and add Description field
+- Remove outdated Translation model and related operations from the codebase
+- Improve error handling in AnalyzeTransaction and related functions
+- Add comprehensive tests for OpenAIService and PromptManager functions 🧪
+- Refactor CreateCategory method for better readability and maintainability
+* **prompts:** restructure prompts data and import functionality 🚀 ([](https://github.com/lindehoff/Budget-Assist/commit/e3e5bb7a483d2336372dc1bacc6a93376fa23f3e))
+  - Changed the structure of `prompts.json` to include prompt types and descriptions.
+- Removed translations from the prompt types and added a new `description` field.
+- Implemented `ImportDefaultPrompts` function to import prompts from `prompts.json`.
+- Added logic to skip import if prompts already exist in the database.
+- Introduced `readDefaultPromptsFile` function to read and parse the prompts file.
+- Enhanced error handling for reading and validating prompts data.
+* **db:** prevent duplicate category type creation 🚫 ([](https://github.com/lindehoff/Budget-Assist/commit/b20c145772a8a0ddf3fabf75eeb6375011277859))
+  - Updated `importCategoryTypes` function to return an error when a duplicate category type name is found.
+- Removed logic that previously used the existing category type's ID, ensuring that duplicates are not silently ignored.
+- Improved error handling to provide clear feedback on duplicate category type names.
+* **lint:** resolve golangci-lint issues in test files ([](https://github.com/lindehoff/Budget-Assist/commit/acaa01016c07f5649d565c914af55ca99435ebb3))
+  Fix various linting issues identified by golangci-lint:
+- Change file permissions in os.WriteFile calls from 0644 to 0600 for security compliance
+- Fix nil pointer dereference in TestDefaultProcessorFactory_NewDefaultProcessorFactory
+- Remove unused mock implementations and helper functions in processor_test.go
+- Ensure mockStore properly implements the db.Store interface
+
+@PR
+* **cmd:** enhance table output for categories and subcategories 📊 ([](https://github.com/lindehoff/Budget-Assist/commit/ec4e18b97b4bab3bb2ef4bcf4f593f87040eb7e8))
+  - Added `tablewriter` package to improve table formatting in output.
+- Updated table header to remove the "Type" and "ID" columns for a cleaner display.
+- Set auto-wrap text and adjusted column width for better readability.
+- Aligned columns for names, descriptions, active status, and tags.
+- Modified subcategory output to show names with indentation for hierarchy clarity.
+* **linter:** fix linter issues and reduce cognitive complexity ([](https://github.com/lindehoff/Budget-Assist/commit/7ba3aafbf4f750152b558bcf8879d947bfa1819a))
+  - Add constants for log levels in config.go
+- Refactor setupLogging in root.go to reduce complexity
+- Pre-allocate handlers slices in MultiHandler
+- Refactor OpenAI service functions to reduce complexity
+- Fix type issues with PromptTemplate
+* update tests to follow go-testing standards and fix empty part handling in PDF processor ([](https://github.com/lindehoff/Budget-Assist/commit/9bf9b89d26d2538897f67befb5db9179391e7225))
+
 ## 2.9.0 (2025-02-28)
 
 * **cmd:** enhance output with subcategories in category.go file 📊 ([](https://github.com/lindehoff/Budget-Assist/commit/f9040ec93b0be12e0521c9579788cde494ade883))
