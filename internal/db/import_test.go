@@ -260,29 +260,23 @@ func Test_ImportDefaultPrompts(t *testing.T) {
 		validateFunc  func(t *testing.T, db *gorm.DB)
 	}{
 		{
-			name: "Successfully_import_default_prompts",
+			name: "Successfully import default prompts",
 			jsonContent: `{
 				"prompts": [
 					{
 						"type": "transaction_categorization",
-						"name": "Test Prompt",
-						"translations": {
-							"en": {
-								"name": "Test Prompt EN",
-								"system_prompt": "You are a helpful assistant",
-								"user_prompt": "Please help me"
-							},
-							"sv": {
-								"name": "Test Prompt SV",
-								"system_prompt": "Du är en hjälpsam assistent",
-								"user_prompt": "Hjälp mig"
-							}
-						},
+						"name": "Test Prompt EN",
+						"system_prompt": "You are a helpful assistant",
+						"user_prompt": "Please categorize: {{.Description}}",
 						"version": "1.0",
 						"is_active": true
 					}
 				]
 			}`,
+			setupFunc: func(t *testing.T, db *gorm.DB) {
+				// No setup needed
+			},
+			expectedError: "",
 			validateFunc: func(t *testing.T, db *gorm.DB) {
 				// Verify prompt was created
 				var prompt Prompt
@@ -298,8 +292,8 @@ func Test_ImportDefaultPrompts(t *testing.T) {
 				if prompt.SystemPrompt != "You are a helpful assistant" {
 					t.Errorf("expected system prompt %q, got %q", "You are a helpful assistant", prompt.SystemPrompt)
 				}
-				if prompt.UserPrompt != "Please help me" {
-					t.Errorf("expected user prompt %q, got %q", "Please help me", prompt.UserPrompt)
+				if prompt.UserPrompt != "Please categorize: {{.Description}}" {
+					t.Errorf("expected user prompt %q, got %q", "Please categorize: {{.Description}}", prompt.UserPrompt)
 				}
 				if prompt.Version != "1.0" {
 					t.Errorf("expected version %q, got %q", "1.0", prompt.Version)

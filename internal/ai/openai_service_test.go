@@ -29,7 +29,11 @@ func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func setupMockClient(statusCode int, body interface{}) *http.Client {
-	responseBody, _ := json.Marshal(body)
+	var responseBody []byte
+
+	// Marshal the body directly, regardless of type
+	responseBody, _ = json.Marshal(body)
+
 	response := &http.Response{
 		StatusCode: statusCode,
 		Body:       io.NopCloser(bytes.NewReader(responseBody)),

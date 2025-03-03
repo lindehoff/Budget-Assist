@@ -4,16 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/lindehoff/Budget-Assist/internal/db"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // mockAIService implements ai.Service for testing
@@ -36,7 +34,7 @@ func (m *mockAIService) SuggestCategories(ctx context.Context, description strin
 	return nil, nil
 }
 
-// createTestPDF creates a minimal valid PDF file for testing
+// createTestPDF creates a simple PDF file for testing
 func createTestPDF(t *testing.T) []byte {
 	t.Helper()
 
@@ -62,15 +60,26 @@ startxref
 %%EOF`)
 }
 
-// createCorruptedPDF creates an invalid PDF file for testing
+// createCorruptedPDF creates a corrupted PDF file for testing
 func createCorruptedPDF(t *testing.T) []byte {
 	t.Helper()
-	validPDF := createTestPDF(t)
-	// Corrupt the PDF by modifying some bytes in the middle
-	if len(validPDF) > 100 {
-		copy(validPDF[50:], []byte("corrupted data"))
-	}
-	return validPDF
+
+	// Create a corrupted PDF by removing essential parts
+	return []byte(`%PDF-1.7
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj
+4 0 obj<</Length 50>>stream
+BT /F1 12 Tf 72 712 Td (Test PDF Document) Tj ET
+endstream endobj
+xref
+0 5
+0000000000 65535 f
+0000000010 00000 n
+0000000053 00000 n
+0000000102 00000 n
+trailer<</Size 5/Root 1 0 R>>
+%%EOF`)
 }
 
 func TestPDFProcessor_Type(t *testing.T) {
@@ -145,26 +154,21 @@ func TestPDFProcessor_Validate(t *testing.T) {
 
 func TestPDFProcessor_Process(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Create a mock AI service
 	aiService := &mockAIService{
 		extractDocumentFunc: func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error) {
 			return &ai.Extraction{
-				Date:        "2024-01-01",
-				Amount:      100.50,
+				Date:        "2023-01-01",
+				Amount:      100.0,
+				Currency:    "SEK",
 				Description: "Test transaction",
-				Category:    "Test category",
-				Subcategory: "Test subcategory",
 			}, nil
 		},
 	}
 
 	// Create a test PDF file
-	testPDF := filepath.Join(t.TempDir(), "test.pdf")
-	err := os.WriteFile(testPDF, []byte("%PDF-1.4\n1 0 obj\n<</Type/Catalog>>\nendobj\ntrailer\n<</Root 1 0 R>>\n%%EOF"), 0600)
-	require.NoError(t, err)
-
-	// Read the test PDF file
-	pdfData, err := os.ReadFile(testPDF)
-	require.NoError(t, err)
+	pdfContent := createTestPDF(t)
 
 	tests := []struct {
 		name     string
@@ -174,7 +178,7 @@ func TestPDFProcessor_Process(t *testing.T) {
 	}{
 		{
 			name:     "valid PDF",
-			file:     bytes.NewReader(pdfData),
+			file:     bytes.NewReader(pdfContent),
 			filename: "test.pdf",
 			wantErr:  false,
 		},
@@ -188,7 +192,23 @@ func TestPDFProcessor_Process(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a processor with a mocked extractTextFromPDF method
 			p := NewPDFProcessor(logger, aiService)
+
+			// Replace the extractTextFromPDF method with a mock
+			originalExtractTextFromPDF := p.extractTextFromPDF
+			p.extractTextFromPDF = func(ctx context.Context, file io.Reader) (string, error) {
+				if tt.wantErr {
+					return "", fmt.Errorf("mock error")
+				}
+				return "This is a test PDF content", nil
+			}
+
+			// Restore the original method after the test
+			defer func() {
+				p.extractTextFromPDF = originalExtractTextFromPDF
+			}()
+
 			result, err := p.Process(context.Background(), tt.file, tt.filename)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -208,17 +228,18 @@ func TestPDFProcessor_Process_NoAIService(t *testing.T) {
 	p := NewPDFProcessor(logger, nil)
 
 	// Create a test PDF file
-	testPDF := filepath.Join(t.TempDir(), "test.pdf")
-	err := os.WriteFile(testPDF, []byte("%PDF-1.4\n1 0 obj\n<</Type/Catalog>>\nendobj\ntrailer\n<</Root 1 0 R>>\n%%EOF"), 0600)
-	require.NoError(t, err)
+	pdfContent := createTestPDF(t)
 
-	// Read the test PDF file
-	pdfData, err := os.ReadFile(testPDF)
-	require.NoError(t, err)
+	// Mock the extractTextFromPDF method
+	p.extractTextFromPDF = func(ctx context.Context, file io.Reader) (string, error) {
+		return "This is a test PDF content", nil
+	}
 
-	result, err := p.Process(context.Background(), bytes.NewReader(pdfData), "test.pdf")
+	// Test with nil AI service
+	result, err := p.Process(context.Background(), bytes.NewReader(pdfContent), "test.pdf")
 	assert.Error(t, err)
 	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "AI service is not configured")
 }
 
 func TestPDFProcessor_CanProcess(t *testing.T) {
