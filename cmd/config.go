@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -72,6 +76,14 @@ var configViewCmd = &cobra.Command{
 	},
 }
 
+// configListCmd is an alias for configViewCmd
+var configListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all configuration settings",
+	Long:  `Display all current configuration settings. This is an alias for 'config view'.`,
+	RunE:  configViewCmd.RunE,
+}
+
 // configInitCmd represents the config init subcommand
 var configInitCmd = &cobra.Command{
 	Use:   "init",
@@ -88,6 +100,9 @@ var configInitCmd = &cobra.Command{
 		viper.SetDefault("ai.enabled", true)
 		viper.SetDefault("ai.timeout", "10s")
 		viper.SetDefault("ai.model", "gpt-4-turbo")
+		viper.SetDefault("logging.level", "info")
+		viper.SetDefault("logging.directory", filepath.Join(userHomeDir, ".budgetassist", "logs"))
+		viper.SetDefault("logging.file", fmt.Sprintf("budgetassist-%s.log", time.Now().Format("2006-01-02")))
 
 		configPath := filepath.Join(userHomeDir, ".budgetassist.yaml")
 		if err := viper.SafeWriteConfigAs(configPath); err != nil {
@@ -130,10 +145,404 @@ var configResetCmd = &cobra.Command{
 	},
 }
 
+// configSetCmd represents the config set subcommand
+var configSetCmd = &cobra.Command{
+	Use:   "set [key] [value]",
+	Short: "Set a configuration value",
+	Long: `Set a configuration value.
+	
+This command allows you to set or update a configuration value.
+The configuration file will be updated with the new value.
+
+Available configuration keys:
+  database.type                  Database type (sqlite)
+  database.path                  Path to the database file
+  database.import_default_categories  Import default categories (true/false)
+  database.import_default_prompts     Import default prompts (true/false)
+  import.default_currency        Default currency for imports (e.g., SEK, USD)
+  export.format                  Default export format (csv, json)
+  ai.enabled                     Enable AI features (true/false)
+  ai.api_key                     API key for AI service
+  ai.model                       AI model to use (e.g., gpt-4-turbo)
+  ai.timeout                     Timeout for AI requests (e.g., 10s, 30s)
+  ai.base_url                    Base URL for AI service
+  ai.max_retries                 Maximum number of retries for AI requests
+  logging.level                  Logging level (debug, info, warn, error)
+  logging.directory              Directory for log files
+  logging.file                   Log file name`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		key := args[0]
+		value := args[1]
+
+		// Validate key
+		validKeys := []string{
+			"database.type", "database.path", "database.import_default_categories", "database.import_default_prompts",
+			"import.default_currency", "export.format",
+			"ai.enabled", "ai.api_key", "ai.model", "ai.timeout", "ai.base_url", "ai.max_retries",
+			"logging.level", "logging.directory", "logging.file",
+		}
+
+		keyValid := false
+		for _, validKey := range validKeys {
+			if key == validKey {
+				keyValid = true
+				break
+			}
+		}
+
+		if !keyValid {
+			return &ConfigError{
+				Operation: "set",
+				Key:       key,
+				Err:       fmt.Errorf("invalid configuration key"),
+			}
+		}
+
+		// Validate and convert value based on key
+		var finalValue interface{}
+		switch key {
+		case "database.import_default_categories", "database.import_default_prompts", "ai.enabled":
+			// Boolean values
+			if strings.ToLower(value) == "true" {
+				finalValue = true
+			} else if strings.ToLower(value) == "false" {
+				finalValue = false
+			} else {
+				return &ConfigError{
+					Operation: "set",
+					Key:       key,
+					Err:       fmt.Errorf("value must be true or false"),
+				}
+			}
+		case "ai.max_retries":
+			// Integer values
+			var intValue int
+			_, err := fmt.Sscanf(value, "%d", &intValue)
+			if err != nil {
+				return &ConfigError{
+					Operation: "set",
+					Key:       key,
+					Err:       fmt.Errorf("value must be an integer"),
+				}
+			}
+			finalValue = intValue
+		case "logging.level":
+			// Validate log level
+			level := strings.ToLower(value)
+			if level != "debug" && level != "info" && level != "warn" && level != "error" {
+				return &ConfigError{
+					Operation: "set",
+					Key:       key,
+					Err:       fmt.Errorf("log level must be one of: debug, info, warn, error"),
+				}
+			}
+			finalValue = level
+		default:
+			// String values
+			finalValue = value
+		}
+
+		// Set the value in viper
+		viper.Set(key, finalValue)
+
+		// Write the updated configuration to file
+		configPath := viper.ConfigFileUsed()
+		if configPath == "" {
+			configPath = filepath.Join(userHomeDir, ".budgetassist.yaml")
+		}
+
+		if err := viper.WriteConfig(); err != nil {
+			// If the config file doesn't exist, create it
+			if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+				if err := viper.SafeWriteConfigAs(configPath); err != nil {
+					return &ConfigError{
+						Operation: "set",
+						Key:       key,
+						Err:       fmt.Errorf("failed to create config file: %w", err),
+					}
+				}
+			} else {
+				return &ConfigError{
+					Operation: "set",
+					Key:       key,
+					Err:       fmt.Errorf("failed to write config: %w", err),
+				}
+			}
+		}
+
+		slog.Info("Configuration updated", "key", key, "value", finalValue)
+		fmt.Printf("Configuration updated: %s = %v\n", key, finalValue)
+		return nil
+	},
+}
+
+// configGetCmd represents the config get subcommand
+var configGetCmd = &cobra.Command{
+	Use:   "get [key]",
+	Short: "Get a configuration value",
+	Long: `Get a specific configuration value.
+	
+This command allows you to retrieve a specific configuration value.
+See 'config set --help' for a list of available configuration keys.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		key := args[0]
+
+		// Check if the key exists
+		if !viper.IsSet(key) {
+			return &ConfigError{
+				Operation: "get",
+				Key:       key,
+				Err:       fmt.Errorf("configuration key not found"),
+			}
+		}
+
+		// Get the value
+		value := viper.Get(key)
+
+		// Mask sensitive data
+		if key == "ai.api_key" {
+			if str, ok := value.(string); ok && len(str) > 8 {
+				value = str[:8] + "..." + str[len(str)-4:]
+			}
+		}
+
+		fmt.Printf("%s = %v\n", key, value)
+		return nil
+	},
+}
+
+// configOptionsCmd represents the config options subcommand
+var configOptionsCmd = &cobra.Command{
+	Use:   "options",
+	Short: "List all available configuration options",
+	Long: `Display all available configuration options with their descriptions, 
+default values, and current values.
+
+This command helps you understand what configuration options are available
+and how they can be set using the 'config set' command.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Define all available configuration options
+		options := []ConfigOption{
+			{
+				Key:          "database.type",
+				Description:  "Database type to use",
+				DefaultValue: "sqlite",
+				CurrentValue: viper.GetString("database.type"),
+				Type:         "string",
+				Example:      "sqlite",
+			},
+			{
+				Key:          "database.path",
+				Description:  "Path to the database file",
+				DefaultValue: filepath.Join(userHomeDir, ".budgetassist.db"),
+				CurrentValue: viper.GetString("database.path"),
+				Type:         "string",
+				Example:      "~/.budgetassist/data.db",
+			},
+			{
+				Key:          "database.import_default_categories",
+				Description:  "Import default categories when initializing the database",
+				DefaultValue: "true",
+				CurrentValue: viper.GetBool("database.import_default_categories"),
+				Type:         "boolean",
+				Example:      "true or false",
+			},
+			{
+				Key:          "database.import_default_prompts",
+				Description:  "Import default prompts when initializing the database",
+				DefaultValue: "true",
+				CurrentValue: viper.GetBool("database.import_default_prompts"),
+				Type:         "boolean",
+				Example:      "true or false",
+			},
+			{
+				Key:          "import.default_currency",
+				Description:  "Default currency for imports",
+				DefaultValue: "SEK",
+				CurrentValue: viper.GetString("import.default_currency"),
+				Type:         "string",
+				Example:      "SEK, USD, EUR",
+			},
+			{
+				Key:          "export.format",
+				Description:  "Default export format",
+				DefaultValue: "csv",
+				CurrentValue: viper.GetString("export.format"),
+				Type:         "string",
+				Example:      "csv, json",
+			},
+			{
+				Key:          "ai.enabled",
+				Description:  "Enable AI features",
+				DefaultValue: "true",
+				CurrentValue: viper.GetBool("ai.enabled"),
+				Type:         "boolean",
+				Example:      "true or false",
+			},
+			{
+				Key:          "ai.api_key",
+				Description:  "API key for AI service",
+				DefaultValue: "",
+				CurrentValue: maskSensitiveValue(viper.GetString("ai.api_key")),
+				Type:         "string",
+				Example:      "sk-...",
+			},
+			{
+				Key:          "ai.model",
+				Description:  "AI model to use",
+				DefaultValue: "gpt-4-turbo",
+				CurrentValue: viper.GetString("ai.model"),
+				Type:         "string",
+				Example:      "gpt-4-turbo, gpt-4o-mini",
+			},
+			{
+				Key:          "ai.timeout",
+				Description:  "Timeout for AI requests",
+				DefaultValue: "10s",
+				CurrentValue: viper.GetString("ai.timeout"),
+				Type:         "duration",
+				Example:      "10s, 30s, 1m",
+			},
+			{
+				Key:          "ai.base_url",
+				Description:  "Base URL for AI service",
+				DefaultValue: "",
+				CurrentValue: viper.GetString("ai.base_url"),
+				Type:         "string",
+				Example:      "https://api.openai.com/v1",
+			},
+			{
+				Key:          "ai.max_retries",
+				Description:  "Maximum number of retries for AI requests",
+				DefaultValue: "3",
+				CurrentValue: viper.GetInt("ai.max_retries"),
+				Type:         "integer",
+				Example:      "3, 5, 10",
+			},
+			{
+				Key:          "logging.level",
+				Description:  "Logging level",
+				DefaultValue: "info",
+				CurrentValue: viper.GetString("logging.level"),
+				Type:         "string",
+				Example:      "debug, info, warn, error",
+			},
+			{
+				Key:          "logging.directory",
+				Description:  "Directory for log files",
+				DefaultValue: filepath.Join(userHomeDir, ".budgetassist", "logs"),
+				CurrentValue: viper.GetString("logging.directory"),
+				Type:         "string",
+				Example:      "~/.budgetassist/logs",
+			},
+			{
+				Key:          "logging.file",
+				Description:  "Log file name",
+				DefaultValue: fmt.Sprintf("budgetassist-%s.log", time.Now().Format("2006-01-02")),
+				CurrentValue: viper.GetString("logging.file"),
+				Type:         "string",
+				Example:      "budgetassist.log",
+			},
+		}
+
+		// Get output format
+		format, _ := cmd.Flags().GetString("format")
+
+		// Output in the requested format
+		switch format {
+		case "json":
+			return outputOptionsAsJSON(options)
+		default:
+			return outputOptionsAsTable(options)
+		}
+	},
+}
+
+// ConfigOption represents a configuration option
+type ConfigOption struct {
+	Key          string
+	Description  string
+	DefaultValue string
+	CurrentValue interface{}
+	Type         string
+	Example      string
+}
+
+// Helper function to mask sensitive values like API keys
+func maskSensitiveValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 8 {
+		return "****"
+	}
+	return value[:4] + "..." + value[len(value)-4:]
+}
+
+// Output options as a JSON document
+func outputOptionsAsJSON(options []ConfigOption) error {
+	jsonData, err := json.MarshalIndent(options, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal options to JSON: %w", err)
+	}
+	fmt.Println(string(jsonData))
+	return nil
+}
+
+// Output options as a formatted table
+func outputOptionsAsTable(options []ConfigOption) error {
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Key", "Description", "Type", "Default", "Current", "Example"})
+	table.SetAutoWrapText(false)
+	table.SetAutoFormatHeaders(true)
+	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	table.SetAlignment(tablewriter.ALIGN_LEFT)
+	table.SetCenterSeparator("")
+	table.SetColumnSeparator("")
+	table.SetRowSeparator("")
+	table.SetHeaderLine(false)
+	table.SetBorder(false)
+	table.SetTablePadding("\t")
+	table.SetNoWhiteSpace(true)
+
+	for _, option := range options {
+		currentValue := fmt.Sprintf("%v", option.CurrentValue)
+
+		// Handle special cases for display
+		if option.Key == "database.path" || option.Key == "logging.directory" {
+			// Replace home directory with ~ for better readability
+			currentValue = strings.Replace(currentValue, userHomeDir, "~", 1)
+			option.DefaultValue = strings.Replace(option.DefaultValue, userHomeDir, "~", 1)
+		}
+
+		table.Append([]string{
+			option.Key,
+			option.Description,
+			option.Type,
+			option.DefaultValue,
+			currentValue,
+			option.Example,
+		})
+	}
+
+	table.Render()
+	return nil
+}
+
 func init() {
 	configCmd.AddCommand(configViewCmd)
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configResetCmd)
+	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configGetCmd)
+	configCmd.AddCommand(configListCmd)
+	configCmd.AddCommand(configOptionsCmd)
+
+	// Add flags for the options command
+	configOptionsCmd.Flags().String("format", "table", "Output format (table or json)")
+
 	rootCmd.AddCommand(configCmd)
 
 	// Initialize Viper configuration

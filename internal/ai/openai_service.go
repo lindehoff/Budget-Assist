@@ -21,6 +21,8 @@ type OpenAIService struct {
 	config      Config
 	retryConfig RetryConfig
 	promptMgr   *PromptManager
+	logger      *slog.Logger
+	store       db.Store
 }
 
 // NewOpenAIService returns a new instance of OpenAIService.
@@ -33,6 +35,8 @@ func NewOpenAIService(config Config, store db.Store, logger *slog.Logger) *OpenA
 		config:      config,
 		retryConfig: DefaultRetryConfig,
 		promptMgr:   NewPromptManager(store, logger),
+		logger:      logger,
+		store:       store,
 	}
 }
 
@@ -91,10 +95,10 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 			{
 				"role": "system",
 				"content": "You are a transaction analyzer. Your task is to analyze the given transaction and return a JSON object with the following fields:\n" +
-					"- kategori (string): The main category of the transaction\n" +
-					"- underkategori (string): The subcategory of the transaction\n" +
-					"- konfidens (float): Your confidence in the categorization (0.0-1.0)\n" +
-					"Only return the JSON object, no explanations or other text.",
+					"- main_category: The main category of the transaction\n" +
+					"- sub_category: The subcategory of the transaction\n" +
+					"- confidence: Your confidence in the categorization (0.0-1.0)\n" +
+					"- metadata: Any additional metadata extracted from the transaction\n",
 			},
 			{
 				"role":    "user",
@@ -104,12 +108,17 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 		"temperature": 0.3,
 	}
 
+	s.logger.Debug("Sending transaction analysis request",
+		"model", s.config.Model,
+		"content_length", len(prompt))
+
 	var results []map[string]interface{}
 	err = s.doRequestWithRetry(ctx, requestPayload, &results, "/v1/chat/completions")
 	if err != nil {
+		s.logger.Error("OpenAI API request failed", "error", err)
 		return nil, &OperationError{
 			Operation: "AnalyzeTransaction",
-			Err:       err,
+			Err:       fmt.Errorf("failed to make API request: %w", err),
 		}
 	}
 
@@ -159,6 +168,8 @@ func (s *OpenAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 	if analysis.Confidence == 0 {
 		analysis.Confidence = 0.8
 	}
+
+	s.logger.Debug("Received OpenAI API response successfully")
 
 	return analysis, nil
 }
@@ -294,10 +305,107 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 		}
 	}
 
+	// Get all available categories
+	categories, err := s.store.ListCategories(ctx, nil)
+	if err != nil {
+		return nil, &OperationError{
+			Operation: "SuggestCategories",
+			Err:       fmt.Errorf("failed to list categories: %w", err),
+		}
+	}
+
+	// Log categories for debugging
+	if s.logger != nil {
+		s.logger.Debug("Retrieved categories",
+			"count", len(categories))
+
+		for _, cat := range categories {
+			s.logger.Debug("Category details",
+				"name", cat.Name,
+				"id", cat.ID,
+				"description", cat.Description,
+				"type", cat.Type,
+				"active", cat.IsActive,
+				"subcategories_count", len(cat.Subcategories))
+		}
+	}
+
+	// Get all available subcategories
+	subcategories, err := s.store.ListSubcategories(ctx)
+	if err != nil {
+		return nil, &OperationError{
+			Operation: "SuggestCategories",
+			Err:       fmt.Errorf("failed to list subcategories: %w", err),
+		}
+	}
+
+	// Log subcategories for debugging
+	if s.logger != nil {
+		s.logger.Debug("Retrieved subcategories",
+			"count", len(subcategories))
+
+		for _, subcat := range subcategories {
+			s.logger.Debug("Subcategory details",
+				"name", subcat.Name,
+				"id", subcat.ID,
+				"description", subcat.Description,
+				"active", subcat.IsActive,
+				"system", subcat.IsSystem,
+				"tags_count", len(subcat.Tags))
+		}
+	}
+
+	// Build category paths for the prompt
+	type CategoryInfo struct {
+		Path        string
+		Description string
+	}
+	var categoryInfos []CategoryInfo
+
+	for _, cat := range categories {
+		// Skip inactive categories
+		if !cat.IsActive {
+			continue
+		}
+		for _, subcat := range subcategories {
+			// Check if this subcategory is linked to this category
+			isLinked := false
+			for _, link := range cat.Subcategories {
+				if link.SubcategoryID == subcat.ID && link.IsActive {
+					isLinked = true
+					break
+				}
+			}
+			if isLinked {
+				path := fmt.Sprintf("%s/%s", cat.Name, subcat.Name)
+				desc := fmt.Sprintf("%s - %s", cat.Description, subcat.Description)
+				categoryInfos = append(categoryInfos, CategoryInfo{
+					Path:        path,
+					Description: desc,
+				})
+			}
+		}
+	}
+
+	// Log available categories for debugging
+	if s.logger != nil {
+		s.logger.Debug("Available category paths",
+			"count", len(categoryInfos))
+
+		for i, cat := range categoryInfos {
+			s.logger.Debug("Category path",
+				"index", i+1,
+				"path", cat.Path,
+				"description", cat.Description)
+		}
+	}
+
 	data := struct {
 		Description string
+		Categories  []CategoryInfo
 	}{
 		Description: desc,
+		Categories:  categoryInfos,
 	}
 
 	prompt, err := template.Execute(data)
@@ -306,6 +414,15 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 			Operation: "SuggestCategories",
 			Err:       fmt.Errorf("failed to generate prompt: %w", err),
 		}
+	}
+
+	// Debug logging for prompt
+	if s.logger != nil {
+		s.logger.Debug("Generated prompt",
+			"description", desc,
+			"system_prompt", template.SystemPrompt,
+			"user_prompt", prompt,
+			"available_categories", len(categoryInfos))
 	}
 
 	requestPayload := map[string]any{
@@ -323,8 +440,9 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 		"temperature": 0.3,
 	}
 
-	var result []CategoryMatch
-	err = s.doRequestWithRetry(ctx, requestPayload, &result, "/v1/chat/completions")
+	// First unmarshal into raw map to handle different response formats
+	var rawResults []map[string]interface{}
+	err = s.doRequestWithRetry(ctx, requestPayload, &rawResults, "/v1/chat/completions")
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "SuggestCategories",
@@ -332,40 +450,85 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 		}
 	}
 
-	return result, nil
+	// Convert response format
+	matches := make([]CategoryMatch, 0)
+	for _, raw := range rawResults {
+		// Try both English and Swedish field names
+		var category string
+		if cat, ok := raw["main_category"].(string); ok {
+			category = cat
+		} else if cat, ok := raw["kategori"].(string); ok {
+			category = cat
+		}
+
+		var confidence float64
+		if conf, ok := raw["confidence"].(float64); ok {
+			confidence = conf
+		} else if conf, ok := raw["konfidens"].(float64); ok {
+			confidence = conf
+		}
+
+		if category != "" {
+			matches = append(matches, CategoryMatch{
+				Category:   category,
+				Confidence: confidence,
+				Raw:        raw,
+			})
+		}
+	}
+
+	return matches, nil
 }
 
 func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload map[string]any, result interface{}, endpoint string) error {
 	operation := func() error {
 		if err := s.rateLimiter.Wait(ctx); err != nil {
+			s.logger.Error("Rate limiter wait failed", "error", err)
 			return err
 		}
 
 		requestBody, err := json.Marshal(requestPayload)
 		if err != nil {
+			s.logger.Error("Failed to marshal request", "error", err)
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.BaseURL+endpoint, bytes.NewReader(requestBody))
 		if err != nil {
+			s.logger.Error("Failed to create request", "error", err, "url", s.config.BaseURL+endpoint)
 			return fmt.Errorf("failed to create request: %w", err)
 		}
 
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
 
+		s.logger.Debug("Sending API request",
+			"endpoint", endpoint,
+			"model", requestPayload["model"],
+			"request_size", len(requestBody))
+
 		resp, err := s.client.Do(req)
 		if err != nil {
+			s.logger.Error("Failed to send request", "error", err, "endpoint", endpoint)
 			return fmt.Errorf("failed to send request: %w", err)
 		}
 		defer resp.Body.Close()
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
+			s.logger.Error("Failed to read response", "error", err)
 			return fmt.Errorf("failed to read response: %w", err)
 		}
 
+		s.logger.Debug("Received API response",
+			"status_code", resp.StatusCode,
+			"content_length", len(body))
+
 		if resp.StatusCode != http.StatusOK {
+			s.logger.Error("API request failed",
+				"status_code", resp.StatusCode,
+				"response", string(body))
+
 			if resp.StatusCode == http.StatusTooManyRequests {
 				return &RateLimitError{
 					Message:    string(body),
@@ -381,20 +544,25 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 
 		var response ChatCompletionResponse
 		if err := json.Unmarshal(body, &response); err != nil {
+			s.logger.Error("Failed to unmarshal response", "error", err)
 			return fmt.Errorf("failed to unmarshal response: %w", err)
 		}
 
 		if len(response.Choices) == 0 {
+			s.logger.Error("No choices returned in response")
 			return ErrNoChoices
 		}
 
 		content := response.Choices[0].Message.Content
 		if content == "" {
+			s.logger.Error("Empty content returned in response")
 			return ErrEmptyContent
 		}
 
 		// Log the content for debugging
-		fmt.Printf("OpenAI response content: %s\n", content)
+		s.logger.Debug("Extracted response content",
+			"content_length", len(content),
+			"choices_count", len(response.Choices))
 
 		// Extract JSON content between ```json and ```
 		jsonStart := strings.Index(content, "```json")
@@ -420,6 +588,10 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 
 		// Try to unmarshal the content
 		if err := json.Unmarshal([]byte(content), result); err != nil {
+			s.logger.Warn("Failed to unmarshal content",
+				"error", err,
+				"content", content)
+
 			// If unmarshaling fails and we're expecting an array but got a single object
 			if strings.HasPrefix(content, "{") {
 				var singleResult map[string]interface{}
@@ -427,6 +599,7 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 					// Convert single object to array if result is a slice
 					if resultSlice, ok := result.(*[]map[string]interface{}); ok {
 						*resultSlice = []map[string]interface{}{singleResult}
+						s.logger.Debug("Converted single object to array")
 						return nil
 					}
 				}
@@ -434,6 +607,7 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 			return fmt.Errorf("failed to unmarshal content: %w", err)
 		}
 
+		s.logger.Debug("Successfully processed API response and unmarshaled result")
 		return nil
 	}
 

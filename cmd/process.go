@@ -52,6 +52,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	// Use global logger configured in root command
 	logger := slog.Default()
 
+	// Log that we're starting processing
+	logger.Info("Starting document processing", "path", path)
+
 	// Get database connection from global config
 	store, err := getStore()
 	if err != nil {
@@ -94,11 +97,15 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 		// Initialize AI service
 		aiService = ai.NewOpenAIService(aiConfig, store, logger)
+		logger.Debug("Initialized OpenAI service", "model", aiConfig.Model, "base_url", aiConfig.BaseURL)
+	} else {
+		logger.Info("AI processing skipped")
 	}
 
 	// Initialize processors
 	pdfProcessor := docprocess.NewPDFProcessor(logger, aiService)
 	csvProcessor := processor.NewSEBProcessor(logger)
+	logger.Debug("Initialized document processors")
 
 	// Get insights from flags
 	docType, _ := cmd.Flags().GetString("doc-type")
@@ -111,17 +118,30 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		TransactionInsights: transactionInsights,
 		CategoryInsights:    categoryInsights,
 	}
+	logger.Debug("Processing options",
+		"document_type", docType,
+		"transaction_insights", transactionInsights != "",
+		"category_insights", categoryInsights != "")
 
 	// Create processing pipeline
 	p := pipeline.NewPipeline(pdfProcessor, csvProcessor, aiService, store, logger)
 
 	// Process documents
+	logger.Info("Processing documents", "path", path)
 	results, err := p.ProcessDocuments(cmd.Context(), path, opts)
 	if err != nil {
+		logger.Error("Failed to process documents", "error", err)
 		return fmt.Errorf("failed to process documents: %w", err)
 	}
 
-	// Print results
+	// Log results summary
+	logger.Info("Processing complete",
+		"files_processed", len(results),
+		"successful", len(results)-countFailures(results),
+		"failed", countFailures(results),
+		"total_transactions", countTransactions(results))
+
+	// Print results in a user-friendly format
 	fmt.Printf("\nProcessing Results:\n")
 	fmt.Printf("==================\n")
 
@@ -147,4 +167,23 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	fmt.Printf("- Total transactions found: %d\n", totalTransactions)
 
 	return nil
+}
+
+// Helper functions for logging
+func countFailures(results []pipeline.ProcessingResult) int {
+	count := 0
+	for _, result := range results {
+		if result.Error != nil {
+			count++
+		}
+	}
+	return count
+}
+
+func countTransactions(results []pipeline.ProcessingResult) int {
+	count := 0
+	for _, result := range results {
+		count += result.TransactionsFound
+	}
+	return count
 }

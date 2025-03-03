@@ -42,13 +42,10 @@ type DefaultPromptsData struct {
 		Type         string `json:"type"`
 		Name         string `json:"name"`
 		Description  string `json:"description"`
-		Translations map[string]struct {
-			Name         string `json:"name"`
-			SystemPrompt string `json:"system_prompt"`
-			UserPrompt   string `json:"user_prompt"`
-		} `json:"translations"`
-		Version  string `json:"version"`
-		IsActive bool   `json:"is_active"`
+		SystemPrompt string `json:"system_prompt"`
+		UserPrompt   string `json:"user_prompt"`
+		Version      string `json:"version"`
+		IsActive     bool   `json:"is_active"`
 	} `json:"prompts"`
 }
 
@@ -305,25 +302,12 @@ func ImportDefaultPrompts(ctx context.Context, db *gorm.DB) error {
 
 	// Import prompts
 	for _, p := range defaultData.Prompts {
-		// Use English translation by default, fallback to Swedish if English is not available
-		var translation struct {
-			Name         string `json:"name"`
-			SystemPrompt string `json:"system_prompt"`
-			UserPrompt   string `json:"user_prompt"`
-		}
-		var ok bool
-		if translation, ok = p.Translations["en"]; !ok {
-			if translation, ok = p.Translations["sv"]; !ok {
-				return fmt.Errorf("no valid translation found for prompt %s (requires either English or Swedish)", p.Name)
-			}
-		}
-
 		prompt := Prompt{
 			Type:         PromptType(p.Type),
-			Name:         translation.Name,
+			Name:         p.Name,
 			Description:  p.Description,
-			SystemPrompt: translation.SystemPrompt,
-			UserPrompt:   translation.UserPrompt,
+			SystemPrompt: p.SystemPrompt,
+			UserPrompt:   p.UserPrompt,
 			Version:      p.Version,
 			IsActive:     p.IsActive,
 		}

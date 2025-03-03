@@ -30,8 +30,9 @@ type AnalysisOptions struct {
 
 // CategoryMatch represents a suggested category with confidence
 type CategoryMatch struct {
-	Category   string  `json:"category"`
-	Confidence float64 `json:"confidence"`
+	Category   string                 `json:"category"`
+	Confidence float64                `json:"confidence"`
+	Raw        map[string]interface{} `json:"-"`
 }
 
 // Analysis represents the result of analyzing a transaction

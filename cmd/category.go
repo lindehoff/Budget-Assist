@@ -56,6 +56,11 @@ This command allows you to:
 - Manage translations for both categories and subcategories
 - Import category hierarchies from JSON files`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Call the parent's PersistentPreRun function first
+		if parent := cmd.Root(); parent != nil && parent.PersistentPreRun != nil {
+			parent.PersistentPreRun(parent, args)
+		}
+
 		if categoryManager == nil {
 			store, err := getStore()
 			if err != nil {
@@ -94,8 +99,14 @@ The output includes:
 		format, _ := cmd.Flags().GetString("format")
 		showSubcategories, _ := cmd.Flags().GetBool("subcategories")
 
+		// Add debug logging
+		slog.Debug("Executing category list command",
+			"format", format,
+			"show_subcategories", showSubcategories)
+
 		categories, err := categoryManager.ListCategories(cmd.Context(), nil)
 		if err != nil {
+			slog.Error("Failed to list categories", "error", err)
 			return &CategoryError{
 				Operation: "list",
 				Resource:  "categories",
@@ -150,6 +161,15 @@ Optional:
 		instanceID, _ := cmd.Flags().GetString("instance-id")
 		subcategories, _ := cmd.Flags().GetStringArray("subcategory")
 
+		// Add debug logging
+		slog.Debug("Executing category add command",
+			"name", name,
+			"description", description,
+			"type_id", typeID,
+			"type", typeName,
+			"instance_id", instanceID,
+			"subcategories", subcategories)
+
 		req := category.CreateCategoryRequest{
 			Name:               name,
 			Description:        description,
@@ -161,6 +181,7 @@ Optional:
 
 		cat, err := categoryManager.CreateCategory(cmd.Context(), req)
 		if err != nil {
+			slog.Error("Failed to create category", "name", name, "error", err)
 			return &CategoryError{
 				Operation: "create",
 				Resource:  name,
@@ -168,6 +189,7 @@ Optional:
 			}
 		}
 
+		slog.Info("Category created successfully", "name", cat.Name, "id", cat.ID)
 		fmt.Printf("Successfully created category %q with ID %d\n", cat.Name, cat.ID)
 		return nil
 	},
@@ -197,6 +219,15 @@ Optional:
 		tags, _ := cmd.Flags().GetStringArray("tag")
 		isSystem, _ := cmd.Flags().GetBool("system")
 
+		// Add debug logging
+		slog.Debug("Executing subcategory add command",
+			"name", name,
+			"description", description,
+			"instance_id", instanceID,
+			"categories", categories,
+			"tags", tags,
+			"is_system", isSystem)
+
 		req := category.CreateSubcategoryRequest{
 			Name:               name,
 			Description:        description,
@@ -208,13 +239,15 @@ Optional:
 
 		subcat, err := categoryManager.CreateSubcategory(cmd.Context(), req)
 		if err != nil {
+			slog.Error("Failed to create subcategory", "name", name, "error", err)
 			return &CategoryError{
-				Operation: "create_subcategory",
+				Operation: "create",
 				Resource:  name,
 				Err:       err,
 			}
 		}
 
+		slog.Info("Subcategory created successfully", "name", subcat.Name, "id", subcat.ID, "categories", categories)
 		fmt.Printf("Successfully created subcategory %q with ID %d\n", subcat.Name, subcat.ID)
 		return nil
 	},
@@ -250,9 +283,20 @@ You can update:
 		addSubs, _ := cmd.Flags().GetStringArray("add-subcategory")
 		removeSubs, _ := cmd.Flags().GetStringArray("remove-subcategory")
 
+		// Add debug logging
+		slog.Debug("Executing category update command",
+			"id", id,
+			"name", name,
+			"description", description,
+			"active", active,
+			"instance_id", instanceID,
+			"add_subcategories", addSubs,
+			"remove_subcategories", removeSubs)
+
 		// Ensure at least one flag is set
 		if name == "" && description == "" && !cmd.Flags().Changed("active") &&
 			instanceID == "" && len(addSubs) == 0 && len(removeSubs) == 0 {
+			slog.Error("Category update failed", "error", "no fields specified for update", "id", id)
 			return &CategoryError{
 				Operation: "update",
 				Resource:  args[0],
@@ -315,6 +359,7 @@ You can update:
 
 		cat, err := categoryManager.UpdateCategory(cmd.Context(), id, req)
 		if err != nil {
+			slog.Error("Failed to update category", "id", id, "error", err)
 			return &CategoryError{
 				Operation: "update",
 				Resource:  fmt.Sprintf("id=%d", id),
@@ -322,6 +367,7 @@ You can update:
 			}
 		}
 
+		slog.Info("Successfully updated category", "id", id, "name", cat.Name)
 		fmt.Printf("Successfully updated category %q (ID: %d)\n", cat.Name, cat.ID)
 		return nil
 	},
@@ -339,12 +385,16 @@ This ensures that historical transactions maintain their categorization.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := parseID(args[0])
 		if err != nil {
+			slog.Error("Category delete failed", "error", "invalid ID", "id_arg", args[0], "error_details", err)
 			return &CategoryError{
 				Operation: "delete",
 				Resource:  args[0],
 				Err:       fmt.Errorf("invalid category ID: %w", err),
 			}
 		}
+
+		// Add debug logging
+		slog.Debug("Executing category delete command", "id", id)
 
 		// Get the category first to show its name in the confirmation
 		cat, err := categoryManager.GetCategoryByID(cmd.Context(), id)
@@ -375,9 +425,11 @@ This ensures that historical transactions maintain their categorization.`,
 
 		cat, err = categoryManager.UpdateCategory(cmd.Context(), id, req)
 		if err != nil {
+			slog.Error("Failed to delete category", "id", id, "error", err)
 			return err
 		}
 
+		slog.Info("Successfully deleted category", "id", id, "name", cat.Name)
 		fmt.Printf("Successfully deleted category %q (ID: %d)\n", cat.Name, cat.ID)
 		return nil
 	},
@@ -396,14 +448,17 @@ The file should contain:
 - Category-subcategory relationships`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filePath := args[0]
+		importFile := args[0]
 
-		data, err := os.ReadFile(filePath)
+		slog.Debug("Starting category import", "file", importFile)
+
+		data, err := os.ReadFile(importFile)
 		if err != nil {
+			slog.Error("Failed to read import file", "file", importFile, "error", err)
 			return &CategoryError{
-				Operation: "import",
-				Resource:  filePath,
-				Err:       fmt.Errorf("failed to read file: %w", err),
+				Operation: "read_import_file",
+				Resource:  importFile,
+				Err:       err,
 			}
 		}
 
@@ -429,12 +484,18 @@ The file should contain:
 		}
 
 		if err := json.Unmarshal(data, &importData); err != nil {
+			slog.Error("Failed to parse import data", "file", importFile, "error", err)
 			return &CategoryError{
-				Operation: "import",
-				Resource:  filePath,
-				Err:       fmt.Errorf("failed to parse JSON: %w", err),
+				Operation: "parse_import_data",
+				Resource:  importFile,
+				Err:       err,
 			}
 		}
+
+		slog.Debug("Parsed import file",
+			"category_types", len(importData.CategoryTypes),
+			"categories", len(importData.Categories),
+			"subcategories", len(importData.Subcategories))
 
 		// First create category types
 		typeMap := make(map[string]uint) // name -> ID mapping
@@ -479,6 +540,11 @@ The file should contain:
 			subcategoryMap[subcat.Name] = subcatObj.ID
 			fmt.Printf("Successfully imported subcategory %q\n", subcatObj.Name)
 		}
+
+		// Add debug logging
+		slog.Debug("Successfully imported subcategories",
+			"count", len(importData.Subcategories),
+			"subcategory_map", subcategoryMap)
 
 		// Finally create categories and link subcategories
 		for _, cat := range importData.Categories {

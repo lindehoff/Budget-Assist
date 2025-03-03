@@ -31,8 +31,8 @@
       "type": "transaction_categorization",
       "name": "Transaktionskategorisering",
       "description": "Kategoriserar finansiella transaktioner",
-      "system_prompt": "Du är en hjälpsam assistent som kategoriserar finansiella transaktioner.",
-      "user_prompt": "Kategorisera denna transaktion enligt våra fördefinierade kategorier:\n\n{{range .Categories}}\n- {{.Path}}: {{.Description}}\n{{end}}\n\nYtterligare kategoriseringsregler för denna specifika transaktion:\n{{.RuntimeInsights}}\n\nTransaktionsdetaljer:\nBeskrivning: {{.Description}}\nBelopp: {{.Amount}}\nDatum: {{.Date}}\n\nSvara med en JSON som innehåller:\n1. main_category: Huvudkategorin\n2. sub_category: Den specifika underkategorin\n3. confidence: Din säkerhet i denna kategorisering (0-1)\n4. reasoning: En kort förklaring till varför denna kategori valdes",
+      "system_prompt": "Du är en hjälpsam assistent som kategoriserar finansiella transaktioner. Du måste använda exakt de fördefinierade kategorierna som tillhandahålls, utan att hitta på egna kategorier.",
+      "user_prompt": "Kategorisera denna transaktion enligt våra fördefinierade kategorier. Du måste använda exakt en av följande kategorisökvägar:\n\n{{range .Categories}}\n- {{.Path}}: {{.Description}}\n{{end}}\n\nYtterligare kategoriseringsregler för denna specifika transaktion:\n{{.RuntimeInsights}}\n\nTransaktionsdetaljer:\nBeskrivning: {{.Description}}\nBelopp: {{.Amount}}\nDatum: {{.Date}}\n\nSvara med ett JSON-objekt som innehåller:\n1. main_category: Exakt sökväg till kategorin (t.ex. 'Fasta kostnader/Medier')\n2. confidence: Din säkerhet i denna kategorisering (0-1)",
       "version": "1.0.0",
       "is_active": true
     }
