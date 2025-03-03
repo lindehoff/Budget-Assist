@@ -193,6 +193,11 @@ func (p *PDFProcessor) convertExtractionToTransactions(extraction *ai.Extraction
 
 // parseTransactionFromPart parses a transaction from a part of the description
 func (p *PDFProcessor) parseTransactionFromPart(part string, extraction *ai.Extraction) (Transaction, bool) {
+	// Check for empty part
+	if part == "" {
+		return Transaction{}, false
+	}
+
 	// Extract amount from description (e.g., "Bredband 600/50 (629.00 SEK)")
 	var amount decimal.Decimal
 	var description string

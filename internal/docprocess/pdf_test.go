@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/lindehoff/Budget-Assist/internal/db"
-	"github.com/stretchr/testify/assert"
+	"github.com/shopspring/decimal"
 )
 
 // mockAIService implements ai.Service for testing
@@ -104,7 +105,12 @@ func TestPDFProcessor_Validate(t *testing.T) {
 
 	tests := []testCase{
 		{
-			name:     "Successfully_validate_empty_file_returns_error",
+			name:    "Successfully_validate_valid_pdf",
+			input:   createTestPDF(t),
+			wantErr: false,
+		},
+		{
+			name:     "Validate_error_empty_file",
 			input:    []byte{},
 			wantErr:  true,
 			errStage: StageValidation,
@@ -114,11 +120,6 @@ func TestPDFProcessor_Validate(t *testing.T) {
 			input:    []byte("not a PDF"),
 			wantErr:  true,
 			errStage: StageValidation,
-		},
-		{
-			name:    "Successfully_validate_valid_pdf",
-			input:   createTestPDF(t),
-			wantErr: false,
 		},
 		{
 			name:     "Validate_error_corrupted_pdf",
@@ -177,13 +178,13 @@ func TestPDFProcessor_Process(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name:     "valid PDF",
+			name:     "Successfully_process_valid_pdf",
 			file:     bytes.NewReader(pdfContent),
 			filename: "test.pdf",
 			wantErr:  false,
 		},
 		{
-			name:     "empty PDF",
+			name:     "Process_error_empty_pdf",
 			file:     bytes.NewReader([]byte{}),
 			filename: "empty.pdf",
 			wantErr:  true,
@@ -211,13 +212,28 @@ func TestPDFProcessor_Process(t *testing.T) {
 
 			result, err := p.Process(context.Background(), tt.file, tt.filename)
 			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, result)
+				if err == nil {
+					t.Errorf("PDFProcessor.Process() error = nil, wantErr %v", tt.wantErr)
+				}
+				if result != nil {
+					t.Errorf("PDFProcessor.Process() result = %v, want nil", result)
+				}
 			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, result)
-				assert.Len(t, result.Transactions, 1)
-				assert.Equal(t, "Test transaction", result.Transactions[0].Description)
+				if err != nil {
+					t.Errorf("PDFProcessor.Process() error = %v, wantErr %v", err, tt.wantErr)
+				}
+				if result == nil {
+					t.Errorf("PDFProcessor.Process() result = nil, want non-nil")
+					return
+				}
+				if len(result.Transactions) != 1 {
+					t.Errorf("PDFProcessor.Process() result.Transactions length = %d, want 1", len(result.Transactions))
+					return
+				}
+				if result.Transactions[0].Description != "Test transaction" {
+					t.Errorf("PDFProcessor.Process() result.Transactions[0].Description = %s, want %s",
+						result.Transactions[0].Description, "Test transaction")
+				}
 			}
 		})
 	}
@@ -237,9 +253,15 @@ func TestPDFProcessor_Process_NoAIService(t *testing.T) {
 
 	// Test with nil AI service
 	result, err := p.Process(context.Background(), bytes.NewReader(pdfContent), "test.pdf")
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "AI service is not configured")
+	if err == nil {
+		t.Errorf("PDFProcessor.Process() error = nil, want error")
+	}
+	if result != nil {
+		t.Errorf("PDFProcessor.Process() result = %v, want nil", result)
+	}
+	if err != nil && !strings.Contains(err.Error(), "AI service is not configured") {
+		t.Errorf("PDFProcessor.Process() error = %v, want error containing 'AI service is not configured'", err)
+	}
 }
 
 func TestPDFProcessor_CanProcess(t *testing.T) {
@@ -252,12 +274,12 @@ func TestPDFProcessor_CanProcess(t *testing.T) {
 		want     bool
 	}{
 		{
-			name:     "PDF file",
+			name:     "Successfully_identify_pdf_file",
 			filename: "test.pdf",
 			want:     true,
 		},
 		{
-			name:     "non-PDF file",
+			name:     "Successfully_identify_non_pdf_file",
 			filename: "test.txt",
 			want:     false,
 		},
@@ -267,7 +289,372 @@ func TestPDFProcessor_CanProcess(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := NewPDFProcessor(logger, aiService)
 			got := p.CanProcess(tt.filename)
-			assert.Equal(t, tt.want, got)
+			if got != tt.want {
+				t.Errorf("PDFProcessor.CanProcess() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultProcessorFactory_NewDefaultProcessorFactory(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+
+	factory := NewDefaultProcessorFactory(logger, aiService)
+	if factory == nil {
+		t.Errorf("NewDefaultProcessorFactory() = nil, want non-nil")
+	}
+	if factory.logger != logger {
+		t.Errorf("factory.logger = %v, want %v", factory.logger, logger)
+	}
+	if factory.aiService != aiService {
+		t.Errorf("factory.aiService = %v, want %v", factory.aiService, aiService)
+	}
+}
+
+func TestDefaultProcessorFactory_CreateProcessor(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	factory := NewDefaultProcessorFactory(logger, aiService)
+
+	tests := []struct {
+		name    string
+		docType DocumentType
+		wantErr bool
+	}{
+		{
+			name:    "Successfully_create_pdf_processor",
+			docType: TypePDF,
+			wantErr: false,
+		},
+		{
+			name:    "CreateProcessor_error_unsupported_type",
+			docType: "unsupported",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			processor, err := factory.CreateProcessor(tt.docType)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("DefaultProcessorFactory.CreateProcessor() error = nil, wantErr %v", tt.wantErr)
+				}
+				if processor != nil {
+					t.Errorf("DefaultProcessorFactory.CreateProcessor() processor = %v, want nil", processor)
+				}
+				if err != nil && !strings.Contains(err.Error(), "unsupported document type") {
+					t.Errorf("DefaultProcessorFactory.CreateProcessor() error = %v, want error containing 'unsupported document type'", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("DefaultProcessorFactory.CreateProcessor() error = %v, wantErr %v", err, tt.wantErr)
+				}
+				if processor == nil {
+					t.Errorf("DefaultProcessorFactory.CreateProcessor() processor = nil, want non-nil")
+					return
+				}
+
+				// Check if it's the right type of processor
+				_, ok := processor.(*PDFProcessor)
+				if !ok {
+					t.Errorf("DefaultProcessorFactory.CreateProcessor() processor type = %T, want *PDFProcessor", processor)
+				}
+			}
+		})
+	}
+}
+
+func TestDefaultProcessorFactory_SupportedTypes(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	factory := NewDefaultProcessorFactory(logger, aiService)
+
+	types := factory.SupportedTypes()
+	if len(types) != 1 {
+		t.Errorf("DefaultProcessorFactory.SupportedTypes() length = %d, want 1", len(types))
+	}
+	if len(types) > 0 && types[0] != TypePDF {
+		t.Errorf("DefaultProcessorFactory.SupportedTypes()[0] = %v, want %v", types[0], TypePDF)
+	}
+}
+
+func TestPDFProcessor_extractDocumentWithAI(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	tests := []struct {
+		name           string
+		aiResponse     *ai.Extraction
+		aiError        error
+		expectedResult *ai.Extraction
+		wantErr        bool
+	}{
+		{
+			name: "Successfully_extract_document_with_ai",
+			aiResponse: &ai.Extraction{
+				Date:        "2023-01-01",
+				Amount:      100.0,
+				Currency:    "SEK",
+				Description: "Test transaction",
+			},
+			aiError: nil,
+			expectedResult: &ai.Extraction{
+				Date:        "2023-01-01",
+				Amount:      100.0,
+				Currency:    "SEK",
+				Description: "Test transaction",
+			},
+			wantErr: false,
+		},
+		{
+			name:           "ExtractDocumentWithAI_error_ai_service_error",
+			aiResponse:     nil,
+			aiError:        fmt.Errorf("AI service error"),
+			expectedResult: nil,
+			wantErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock AI service with the desired behavior
+			aiService := &mockAIService{
+				extractDocumentFunc: func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error) {
+					return tt.aiResponse, tt.aiError
+				},
+			}
+
+			processor := NewPDFProcessor(logger, aiService)
+
+			// Call the method
+			result, err := processor.extractDocumentWithAI(context.Background(), "test content")
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() error = nil, wantErr %v", tt.wantErr)
+				}
+				if result != nil {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() result = %v, want nil", result)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() error = %v, wantErr %v", err, tt.wantErr)
+				}
+				if result == nil {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() result = nil, want non-nil")
+					return
+				}
+				if result.Date != tt.expectedResult.Date {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() result.Date = %v, want %v",
+						result.Date, tt.expectedResult.Date)
+				}
+				if result.Amount != tt.expectedResult.Amount {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() result.Amount = %v, want %v",
+						result.Amount, tt.expectedResult.Amount)
+				}
+				if result.Currency != tt.expectedResult.Currency {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() result.Currency = %v, want %v",
+						result.Currency, tt.expectedResult.Currency)
+				}
+				if result.Description != tt.expectedResult.Description {
+					t.Errorf("PDFProcessor.extractDocumentWithAI() result.Description = %v, want %v",
+						result.Description, tt.expectedResult.Description)
+				}
+			}
+		})
+	}
+}
+
+func TestPDFProcessor_convertExtractionToTransactions(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	processor := NewPDFProcessor(logger, aiService)
+
+	tests := []struct {
+		name       string
+		extraction *ai.Extraction
+		wantCount  int
+	}{
+		{
+			name: "Successfully_convert_single_transaction",
+			extraction: &ai.Extraction{
+				Date:        "2023-01-01",
+				Amount:      100.0,
+				Currency:    "SEK",
+				Description: "Test transaction",
+			},
+			wantCount: 1,
+		},
+		{
+			name: "Successfully_convert_multiple_transactions",
+			extraction: &ai.Extraction{
+				Date:        "2023-01-01",
+				Amount:      300.0,
+				Currency:    "SEK",
+				Description: "Transaction 1, Transaction 2, Transaction 3",
+			},
+			wantCount: 3,
+		},
+		{
+			name:       "Successfully_handle_nil_extraction",
+			extraction: nil,
+			wantCount:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Call the method
+			transactions := processor.convertExtractionToTransactions(tt.extraction)
+
+			if len(transactions) != tt.wantCount {
+				t.Errorf("PDFProcessor.convertExtractionToTransactions() length = %d, want %d",
+					len(transactions), tt.wantCount)
+				return
+			}
+
+			// Check transaction fields
+			if tt.wantCount > 0 && tt.extraction != nil {
+				// For single transaction case
+				if tt.wantCount == 1 && !strings.Contains(tt.extraction.Description, ",") {
+					if transactions[0].Description != tt.extraction.Description {
+						t.Errorf("PDFProcessor.convertExtractionToTransactions() transaction.Description = %v, want %v",
+							transactions[0].Description, tt.extraction.Description)
+					}
+					if !transactions[0].Amount.Equal(decimal.NewFromFloat(tt.extraction.Amount)) {
+						t.Errorf("PDFProcessor.convertExtractionToTransactions() transaction.Amount = %v, want %v",
+							transactions[0].Amount, decimal.NewFromFloat(tt.extraction.Amount))
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPDFProcessor_parseTransactionFromPart(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	processor := NewPDFProcessor(logger, aiService)
+
+	extraction := &ai.Extraction{
+		Date:        "2023-01-01",
+		Amount:      100.0,
+		Currency:    "SEK",
+		Description: "Test transaction",
+	}
+
+	tests := []struct {
+		name   string
+		part   string
+		wantTx bool
+	}{
+		{
+			name:   "Successfully_parse_transaction_with_amount",
+			part:   "Test transaction (100.0 SEK)",
+			wantTx: true,
+		},
+		{
+			name:   "Successfully_parse_transaction_without_amount",
+			part:   "Test transaction",
+			wantTx: true,
+		},
+		{
+			name:   "Successfully_handle_empty_part",
+			part:   "",
+			wantTx: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Call the method
+			tx, ok := processor.parseTransactionFromPart(tt.part, extraction)
+
+			if ok != tt.wantTx {
+				t.Errorf("PDFProcessor.parseTransactionFromPart() ok = %v, want %v", ok, tt.wantTx)
+				return
+			}
+
+			if tt.wantTx {
+				if tx.Description == "" {
+					t.Errorf("PDFProcessor.parseTransactionFromPart() tx.Description is empty, want non-empty")
+				}
+
+				// If the part contains an amount in SEK format
+				if strings.Contains(tt.part, " (") && strings.HasSuffix(tt.part, " SEK)") {
+					if tx.Amount.Equal(decimal.NewFromFloat(0)) {
+						t.Errorf("PDFProcessor.parseTransactionFromPart() tx.Amount = 0, want non-zero")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPDFProcessor_extractionToMap(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	processor := NewPDFProcessor(logger, aiService)
+
+	tests := []struct {
+		name       string
+		extraction *ai.Extraction
+		wantEmpty  bool
+	}{
+		{
+			name: "Successfully_convert_extraction_to_map",
+			extraction: &ai.Extraction{
+				Date:        "2023-01-01",
+				Amount:      100.0,
+				Currency:    "SEK",
+				Description: "Test transaction",
+			},
+			wantEmpty: false,
+		},
+		{
+			name:       "Successfully_handle_nil_extraction",
+			extraction: nil,
+			wantEmpty:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Call the method
+			result := processor.extractionToMap(tt.extraction)
+
+			if tt.wantEmpty {
+				if len(result) != 0 {
+					t.Errorf("PDFProcessor.extractionToMap() result length = %d, want 0", len(result))
+				}
+			} else {
+				if len(result) == 0 {
+					t.Errorf("PDFProcessor.extractionToMap() result is empty, want non-empty")
+					return
+				}
+
+				// Check if the map contains the expected fields
+				if tt.extraction != nil {
+					if result["date"] != tt.extraction.Date {
+						t.Errorf("PDFProcessor.extractionToMap() result[\"date\"] = %v, want %v",
+							result["date"], tt.extraction.Date)
+					}
+					if result["amount"] != tt.extraction.Amount {
+						t.Errorf("PDFProcessor.extractionToMap() result[\"amount\"] = %v, want %v",
+							result["amount"], tt.extraction.Amount)
+					}
+					if result["currency"] != tt.extraction.Currency {
+						t.Errorf("PDFProcessor.extractionToMap() result[\"currency\"] = %v, want %v",
+							result["currency"], tt.extraction.Currency)
+					}
+					if result["description"] != tt.extraction.Description {
+						t.Errorf("PDFProcessor.extractionToMap() result[\"description\"] = %v, want %v",
+							result["description"], tt.extraction.Description)
+					}
+				}
+			}
 		})
 	}
 }
