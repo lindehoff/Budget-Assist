@@ -14,6 +14,14 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Constants for log levels
+const (
+	logLevelDebug = "debug"
+	logLevelInfo  = "info"
+	logLevelWarn  = "warn"
+	logLevelError = "error"
+)
+
 // ConfigError represents configuration-related errors
 type ConfigError struct {
 	Err       error
@@ -147,67 +155,33 @@ var configResetCmd = &cobra.Command{
 
 // configSetCmd represents the config set subcommand
 var configSetCmd = &cobra.Command{
-	Use:   "set [key] [value]",
+	Use:   "set KEY VALUE",
 	Short: "Set a configuration value",
-	Long: `Set a configuration value.
+	Long: `Set a configuration value in the configuration file.
 	
-This command allows you to set or update a configuration value.
-The configuration file will be updated with the new value.
-
-Available configuration keys:
-  database.type                  Database type (sqlite)
-  database.path                  Path to the database file
-  database.import_default_categories  Import default categories (true/false)
-  database.import_default_prompts     Import default prompts (true/false)
-  import.default_currency        Default currency for imports (e.g., SEK, USD)
-  export.format                  Default export format (csv, json)
-  ai.enabled                     Enable AI features (true/false)
-  ai.api_key                     API key for AI service
-  ai.model                       AI model to use (e.g., gpt-4-turbo)
-  ai.timeout                     Timeout for AI requests (e.g., 10s, 30s)
-  ai.base_url                    Base URL for AI service
-  ai.max_retries                 Maximum number of retries for AI requests
-  logging.level                  Logging level (debug, info, warn, error)
-  logging.directory              Directory for log files
-  logging.file                   Log file name`,
+For example:
+  budgetassist config set logging.level debug
+  budgetassist config set ai.model gpt-4-turbo
+  budgetassist config set import.default_currency USD`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 		value := args[1]
 
-		// Validate key
-		validKeys := []string{
-			"database.type", "database.path", "database.import_default_categories", "database.import_default_prompts",
-			"import.default_currency", "export.format",
-			"ai.enabled", "ai.api_key", "ai.model", "ai.timeout", "ai.base_url", "ai.max_retries",
-			"logging.level", "logging.directory", "logging.file",
-		}
-
-		keyValid := false
-		for _, validKey := range validKeys {
-			if key == validKey {
-				keyValid = true
-				break
-			}
-		}
-
-		if !keyValid {
-			return &ConfigError{
-				Operation: "set",
-				Key:       key,
-				Err:       fmt.Errorf("invalid configuration key"),
-			}
-		}
-
-		// Validate and convert value based on key
-		var finalValue interface{}
+		// Special handling for certain keys
 		switch key {
+		case "logging.level":
+			level := strings.ToLower(value)
+			if level != logLevelDebug && level != logLevelInfo && level != logLevelWarn && level != logLevelError {
+				return fmt.Errorf("invalid log level: %s, must be one of: debug, info, warn, error", value)
+			}
+			viper.Set(key, level)
 		case "database.import_default_categories", "database.import_default_prompts", "ai.enabled":
 			// Boolean values
 			if strings.ToLower(value) == "true" {
-				finalValue = true
+				viper.Set(key, true)
 			} else if strings.ToLower(value) == "false" {
-				finalValue = false
+				viper.Set(key, false)
 			} else {
 				return &ConfigError{
 					Operation: "set",
@@ -226,25 +200,11 @@ Available configuration keys:
 					Err:       fmt.Errorf("value must be an integer"),
 				}
 			}
-			finalValue = intValue
-		case "logging.level":
-			// Validate log level
-			level := strings.ToLower(value)
-			if level != "debug" && level != "info" && level != "warn" && level != "error" {
-				return &ConfigError{
-					Operation: "set",
-					Key:       key,
-					Err:       fmt.Errorf("log level must be one of: debug, info, warn, error"),
-				}
-			}
-			finalValue = level
+			viper.Set(key, intValue)
 		default:
 			// String values
-			finalValue = value
+			viper.Set(key, value)
 		}
-
-		// Set the value in viper
-		viper.Set(key, finalValue)
 
 		// Write the updated configuration to file
 		configPath := viper.ConfigFileUsed()
@@ -271,8 +231,8 @@ Available configuration keys:
 			}
 		}
 
-		slog.Info("Configuration updated", "key", key, "value", finalValue)
-		fmt.Printf("Configuration updated: %s = %v\n", key, finalValue)
+		slog.Info("Configuration updated", "key", key, "value", value)
+		fmt.Printf("Configuration updated: %s = %v\n", key, value)
 		return nil
 	},
 }

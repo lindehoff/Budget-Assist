@@ -295,8 +295,9 @@ func (s *OpenAIService) ExtractDocument(ctx context.Context, doc *Document) (*Ex
 	return extraction, nil
 }
 
-// SuggestCategories suggests categories for a given description using OpenAI's API.
+// SuggestCategories suggests categories for a transaction description
 func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error) {
+	// Get the prompt template
 	template, err := s.promptMgr.GetPrompt(ctx, db.TransactionCategorizationPrompt)
 	if err != nil {
 		return nil, &OperationError{
@@ -305,6 +306,30 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 		}
 	}
 
+	// Get category information
+	categoryInfos, err := s.getCategoryInfos(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate the prompt
+	prompt, err := s.generateCategoryPrompt(template, desc, categoryInfos)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make the API request
+	rawResults, err := s.makeCategoryRequest(ctx, template.SystemPrompt, prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process the results
+	return s.processCategoryResults(rawResults), nil
+}
+
+// getCategoryInfos retrieves and processes category information from the database
+func (s *OpenAIService) getCategoryInfos(ctx context.Context) ([]CategoryInfo, error) {
 	// Get all available categories
 	categories, err := s.store.ListCategories(ctx, nil)
 	if err != nil {
@@ -316,9 +341,7 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 
 	// Log categories for debugging
 	if s.logger != nil {
-		s.logger.Debug("Retrieved categories",
-			"count", len(categories))
-
+		s.logger.Debug("Retrieved categories", "count", len(categories))
 		for _, cat := range categories {
 			s.logger.Debug("Category details",
 				"name", cat.Name,
@@ -341,9 +364,7 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 
 	// Log subcategories for debugging
 	if s.logger != nil {
-		s.logger.Debug("Retrieved subcategories",
-			"count", len(subcategories))
-
+		s.logger.Debug("Retrieved subcategories", "count", len(subcategories))
 		for _, subcat := range subcategories {
 			s.logger.Debug("Subcategory details",
 				"name", subcat.Name,
@@ -356,10 +377,6 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 	}
 
 	// Build category paths for the prompt
-	type CategoryInfo struct {
-		Path        string
-		Description string
-	}
 	var categoryInfos []CategoryInfo
 
 	for _, cat := range categories {
@@ -389,9 +406,7 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 
 	// Log available categories for debugging
 	if s.logger != nil {
-		s.logger.Debug("Available category paths",
-			"count", len(categoryInfos))
-
+		s.logger.Debug("Available category paths", "count", len(categoryInfos))
 		for i, cat := range categoryInfos {
 			s.logger.Debug("Category path",
 				"index", i+1,
@@ -400,6 +415,17 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 		}
 	}
 
+	return categoryInfos, nil
+}
+
+// CategoryInfo represents a category path and description
+type CategoryInfo struct {
+	Path        string
+	Description string
+}
+
+// generateCategoryPrompt generates the prompt for category suggestion
+func (s *OpenAIService) generateCategoryPrompt(template *PromptTemplate, desc string, categoryInfos []CategoryInfo) (string, error) {
 	data := struct {
 		Description string
 		Categories  []CategoryInfo
@@ -410,7 +436,7 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 
 	prompt, err := template.Execute(data)
 	if err != nil {
-		return nil, &OperationError{
+		return "", &OperationError{
 			Operation: "SuggestCategories",
 			Err:       fmt.Errorf("failed to generate prompt: %w", err),
 		}
@@ -425,12 +451,17 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 			"available_categories", len(categoryInfos))
 	}
 
+	return prompt, nil
+}
+
+// makeCategoryRequest makes the API request for category suggestion
+func (s *OpenAIService) makeCategoryRequest(ctx context.Context, systemPrompt string, prompt string) ([]map[string]interface{}, error) {
 	requestPayload := map[string]any{
 		"model": s.config.Model,
 		"messages": []map[string]string{
 			{
 				"role":    "system",
-				"content": template.SystemPrompt,
+				"content": systemPrompt,
 			},
 			{
 				"role":    "user",
@@ -442,7 +473,7 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 
 	// First unmarshal into raw map to handle different response formats
 	var rawResults []map[string]interface{}
-	err = s.doRequestWithRetry(ctx, requestPayload, &rawResults, "/v1/chat/completions")
+	err := s.doRequestWithRetry(ctx, requestPayload, &rawResults, "/v1/chat/completions")
 	if err != nil {
 		return nil, &OperationError{
 			Operation: "SuggestCategories",
@@ -450,8 +481,13 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 		}
 	}
 
+	return rawResults, nil
+}
+
+// processCategoryResults processes the raw results from the API
+func (s *OpenAIService) processCategoryResults(rawResults []map[string]interface{}) []CategoryMatch {
 	// Convert response format
-	matches := make([]CategoryMatch, 0)
+	matches := make([]CategoryMatch, 0, len(rawResults))
 	for _, raw := range rawResults {
 		// Try both English and Swedish field names
 		var category string
@@ -477,9 +513,10 @@ func (s *OpenAIService) SuggestCategories(ctx context.Context, desc string) ([]C
 		}
 	}
 
-	return matches, nil
+	return matches
 }
 
+// doRequestWithRetry sends a request to the OpenAI API with retry logic
 func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload map[string]any, result interface{}, endpoint string) error {
 	operation := func() error {
 		if err := s.rateLimiter.Wait(ctx); err != nil {
@@ -487,12 +524,14 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 			return err
 		}
 
+		// Marshal the request payload
 		requestBody, err := json.Marshal(requestPayload)
 		if err != nil {
 			s.logger.Error("Failed to marshal request", "error", err)
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
+		// Create the request
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.BaseURL+endpoint, bytes.NewReader(requestBody))
 		if err != nil {
 			s.logger.Error("Failed to create request", "error", err, "url", s.config.BaseURL+endpoint)
@@ -507,13 +546,15 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 			"model", requestPayload["model"],
 			"request_size", len(requestBody))
 
+		// Send the request
 		resp, err := s.client.Do(req)
 		if err != nil {
 			s.logger.Error("Failed to send request", "error", err, "endpoint", endpoint)
 			return fmt.Errorf("failed to send request: %w", err)
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() // Ensure body is closed
 
+		// Read the response body
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			s.logger.Error("Failed to read response", "error", err)
@@ -524,92 +565,117 @@ func (s *OpenAIService) doRequestWithRetry(ctx context.Context, requestPayload m
 			"status_code", resp.StatusCode,
 			"content_length", len(body))
 
+		// Handle non-200 responses
 		if resp.StatusCode != http.StatusOK {
-			s.logger.Error("API request failed",
-				"status_code", resp.StatusCode,
-				"response", string(body))
-
-			if resp.StatusCode == http.StatusTooManyRequests {
-				return &RateLimitError{
-					Message:    string(body),
-					StatusCode: resp.StatusCode,
-				}
-			}
-			return &OpenAIError{
-				Operation:  "API request",
-				Message:    string(body),
-				StatusCode: resp.StatusCode,
-			}
+			return s.handleErrorResponse(resp, body)
 		}
 
-		var response ChatCompletionResponse
-		if err := json.Unmarshal(body, &response); err != nil {
-			s.logger.Error("Failed to unmarshal response", "error", err)
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-
-		if len(response.Choices) == 0 {
-			s.logger.Error("No choices returned in response")
-			return ErrNoChoices
-		}
-
-		content := response.Choices[0].Message.Content
-		if content == "" {
-			s.logger.Error("Empty content returned in response")
-			return ErrEmptyContent
-		}
-
-		// Log the content for debugging
-		s.logger.Debug("Extracted response content",
-			"content_length", len(content),
-			"choices_count", len(response.Choices))
-
-		// Extract JSON content between ```json and ```
-		jsonStart := strings.Index(content, "```json")
-		if jsonStart == -1 {
-			jsonStart = strings.Index(content, "```")
-		}
-		if jsonStart != -1 {
-			content = content[jsonStart:]
-			content = strings.TrimPrefix(content, "```json")
-			content = strings.TrimPrefix(content, "```")
-			if idx := strings.Index(content, "```"); idx != -1 {
-				content = content[:idx]
-			}
-		}
-		content = strings.TrimSpace(content)
-
-		// If the content starts with a Swedish response, try to find the JSON part
-		if strings.HasPrefix(content, "Här") || strings.HasPrefix(content, "För") {
-			if idx := strings.Index(content, "["); idx != -1 {
-				content = content[idx:]
-			}
-		}
-
-		// Try to unmarshal the content
-		if err := json.Unmarshal([]byte(content), result); err != nil {
-			s.logger.Warn("Failed to unmarshal content",
-				"error", err,
-				"content", content)
-
-			// If unmarshaling fails and we're expecting an array but got a single object
-			if strings.HasPrefix(content, "{") {
-				var singleResult map[string]interface{}
-				if err := json.Unmarshal([]byte(content), &singleResult); err == nil {
-					// Convert single object to array if result is a slice
-					if resultSlice, ok := result.(*[]map[string]interface{}); ok {
-						*resultSlice = []map[string]interface{}{singleResult}
-						s.logger.Debug("Converted single object to array")
-						return nil
-					}
-				}
-			}
-			return fmt.Errorf("failed to unmarshal content: %w", err)
-		}
-
-		s.logger.Debug("Successfully processed API response and unmarshaled result")
-		return nil
+		// Parse the response
+		return s.parseResponse(body, result)
 	}
 
 	return retryWithBackoff(ctx, s.retryConfig, operation)
+}
+
+// handleErrorResponse processes non-200 responses from the API
+func (s *OpenAIService) handleErrorResponse(resp *http.Response, body []byte) error {
+	s.logger.Error("API request failed",
+		"status_code", resp.StatusCode,
+		"response", string(body))
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return &RateLimitError{
+			Message:    string(body),
+			StatusCode: resp.StatusCode,
+		}
+	}
+	return &OpenAIError{
+		Operation:  "API request",
+		Message:    string(body),
+		StatusCode: resp.StatusCode,
+	}
+}
+
+// parseResponse processes the API response and extracts the result
+func (s *OpenAIService) parseResponse(body []byte, result interface{}) error {
+	var response ChatCompletionResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		s.logger.Error("Failed to unmarshal response", "error", err)
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if len(response.Choices) == 0 {
+		s.logger.Error("No choices returned in response")
+		return ErrNoChoices
+	}
+
+	content := response.Choices[0].Message.Content
+	if content == "" {
+		s.logger.Error("Empty content returned in response")
+		return ErrEmptyContent
+	}
+
+	// Log the content for debugging
+	s.logger.Debug("Extracted response content",
+		"content_length", len(content),
+		"choices_count", len(response.Choices))
+
+	// Extract and process the content
+	processedContent := s.extractJSONContent(content)
+
+	// Try to unmarshal the content
+	if err := json.Unmarshal([]byte(processedContent), result); err != nil {
+		return s.handleUnmarshalError(processedContent, result, err)
+	}
+
+	s.logger.Debug("Successfully processed API response and unmarshaled result")
+	return nil
+}
+
+// extractJSONContent extracts JSON content from the response
+func (s *OpenAIService) extractJSONContent(content string) string {
+	// Extract JSON content between ```json and ```
+	jsonStart := strings.Index(content, "```json")
+	if jsonStart == -1 {
+		jsonStart = strings.Index(content, "```")
+	}
+	if jsonStart != -1 {
+		content = content[jsonStart:]
+		content = strings.TrimPrefix(content, "```json")
+		content = strings.TrimPrefix(content, "```")
+		if idx := strings.Index(content, "```"); idx != -1 {
+			content = content[:idx]
+		}
+	}
+	content = strings.TrimSpace(content)
+
+	// If the content starts with a Swedish response, try to find the JSON part
+	if strings.HasPrefix(content, "Här") || strings.HasPrefix(content, "För") {
+		if idx := strings.Index(content, "["); idx != -1 {
+			content = content[idx:]
+		}
+	}
+
+	return content
+}
+
+// handleUnmarshalError handles errors when unmarshaling the response content
+func (s *OpenAIService) handleUnmarshalError(content string, result interface{}, err error) error {
+	s.logger.Warn("Failed to unmarshal content",
+		"error", err,
+		"content", content)
+
+	// If unmarshaling fails and we're expecting an array but got a single object
+	if strings.HasPrefix(content, "{") {
+		var singleResult map[string]interface{}
+		if err := json.Unmarshal([]byte(content), &singleResult); err == nil {
+			// Convert single object to array if result is a slice
+			if resultSlice, ok := result.(*[]map[string]interface{}); ok {
+				*resultSlice = []map[string]interface{}{singleResult}
+				s.logger.Debug("Converted single object to array")
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("failed to unmarshal content: %w", err)
 }

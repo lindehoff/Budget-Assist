@@ -6,6 +6,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,7 @@ var rootCmd = &cobra.Command{
 manage your personal finances efficiently. It provides features for
 importing transactions, categorizing expenses, and generating reports.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		setupLogging(cmd)
+		setupLogging()
 	},
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
@@ -91,10 +92,32 @@ func initConfig() {
 	}
 }
 
-// setupLogging configures the global logger with file and optional console output
-func setupLogging(cmd *cobra.Command) {
-	// Determine log level from configuration
-	logLevel := slog.LevelInfo // Default level
+// setupLogging configures the logging system based on configuration and flags
+func setupLogging() {
+	// Determine log level
+	logLevel := determineLogLevel()
+
+	// Set up log file
+	file, _ := setupLogFile()
+
+	// Create appropriate handlers
+	handler := createLogHandlers(file, logLevel)
+
+	// Set global logger
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+
+	// Log startup information
+	slog.Info("Application started",
+		"version", viper.GetString("version"),
+		"log_level", logLevel.String(),
+		"config_file", viper.ConfigFileUsed())
+}
+
+// determineLogLevel determines the log level from config, flags, and environment variables
+func determineLogLevel() slog.Level {
+	// Default level
+	logLevel := slog.LevelInfo
 
 	// Check configuration file for log level
 	configLogLevel := strings.ToLower(viper.GetString("logging.level"))
@@ -128,6 +151,11 @@ func setupLogging(cmd *cobra.Command) {
 		}
 	}
 
+	return logLevel
+}
+
+// setupLogFile creates the log directory and opens the log file
+func setupLogFile() (*os.File, string) {
 	// Create log directory if needed
 	logDir := viper.GetString("logging.directory")
 	if logDir == "" {
@@ -137,6 +165,7 @@ func setupLogging(cmd *cobra.Command) {
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		// If we can't create the log directory, we'll fall back to console-only logging
 		fmt.Fprintf(os.Stderr, "Error creating log directory: %v\n", err)
+		return nil, ""
 	}
 
 	// Configure log file
@@ -154,11 +183,53 @@ func setupLogging(cmd *cobra.Command) {
 	if err != nil {
 		// Fall back to console-only logging if file can't be opened
 		fmt.Fprintf(os.Stderr, "Error opening log file: %v\n", err)
+		return nil, ""
 	}
 
-	// Set up handlers based on configuration
-	var handler slog.Handler
+	return file, logFilePath
+}
 
+// createColoredTextHandler creates a text handler with colored log levels
+func createColoredTextHandler(output io.Writer, level slog.Level) slog.Handler {
+	return slog.NewTextHandler(output, &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Format the time for better readability
+			if a.Key == slog.TimeKey {
+				return slog.Attr{
+					Key:   a.Key,
+					Value: slog.StringValue(time.Now().Format("15:04:05")),
+				}
+			}
+			// Add color to log level if terminal supports it
+			if a.Key == slog.LevelKey {
+				level := a.Value.Any().(slog.Level)
+				levelStr := level.String()
+
+				// Color the level based on severity
+				switch level {
+				case slog.LevelDebug:
+					levelStr = "\033[36mDEBUG\033[0m" // Cyan
+				case slog.LevelInfo:
+					levelStr = "\033[32mINFO\033[0m" // Green
+				case slog.LevelWarn:
+					levelStr = "\033[33mWARN\033[0m" // Yellow
+				case slog.LevelError:
+					levelStr = "\033[31mERROR\033[0m" // Red
+				}
+
+				return slog.Attr{
+					Key:   a.Key,
+					Value: slog.StringValue(levelStr),
+				}
+			}
+			return a
+		},
+	})
+}
+
+// createLogHandlers creates the appropriate log handlers based on configuration
+func createLogHandlers(file *os.File, logLevel slog.Level) slog.Handler {
 	// Create file handler if file was opened successfully
 	if file != nil {
 		fileHandler := slog.NewJSONHandler(file, &slog.HandlerOptions{
@@ -169,102 +240,23 @@ func setupLogging(cmd *cobra.Command) {
 		// If debug flag is set, use a multi handler for both console and file
 		if debugFlag {
 			// Create console handler with a more distinguishable format
-			consoleHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-				Level: logLevel,
-				ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-					// Format the time for better readability
-					if a.Key == slog.TimeKey {
-						return slog.Attr{
-							Key:   a.Key,
-							Value: slog.StringValue(time.Now().Format("15:04:05")),
-						}
-					}
-					// Add color to log level if terminal supports it
-					if a.Key == slog.LevelKey {
-						level := a.Value.Any().(slog.Level)
-						levelStr := level.String()
-
-						// Color the level based on severity
-						switch level {
-						case slog.LevelDebug:
-							levelStr = "\033[36mDEBUG\033[0m" // Cyan
-						case slog.LevelInfo:
-							levelStr = "\033[32mINFO\033[0m" // Green
-						case slog.LevelWarn:
-							levelStr = "\033[33mWARN\033[0m" // Yellow
-						case slog.LevelError:
-							levelStr = "\033[31mERROR\033[0m" // Red
-						}
-
-						return slog.Attr{
-							Key:   a.Key,
-							Value: slog.StringValue(levelStr),
-						}
-					}
-					return a
-				},
-			})
+			consoleHandler := createColoredTextHandler(os.Stderr, logLevel)
 
 			// Create a multi-handler that sends logs to both console and file
-			handler = NewMultiHandler(consoleHandler, fileHandler)
-		} else {
-			// Use only file handler when debug flag is not set
-			handler = fileHandler
+			return NewMultiHandler(consoleHandler, fileHandler)
 		}
-	} else {
-		// Fall back to console-only logging if file couldn't be opened
-		// Only show logs in console if debug flag is set
-		if debugFlag {
-			handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-				Level: logLevel,
-				ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-					// Format the time for better readability
-					if a.Key == slog.TimeKey {
-						return slog.Attr{
-							Key:   a.Key,
-							Value: slog.StringValue(time.Now().Format("15:04:05")),
-						}
-					}
-					// Add color to log level if terminal supports it
-					if a.Key == slog.LevelKey {
-						level := a.Value.Any().(slog.Level)
-						levelStr := level.String()
-
-						// Color the level based on severity
-						switch level {
-						case slog.LevelDebug:
-							levelStr = "\033[36mDEBUG\033[0m" // Cyan
-						case slog.LevelInfo:
-							levelStr = "\033[32mINFO\033[0m" // Green
-						case slog.LevelWarn:
-							levelStr = "\033[33mWARN\033[0m" // Yellow
-						case slog.LevelError:
-							levelStr = "\033[31mERROR\033[0m" // Red
-						}
-
-						return slog.Attr{
-							Key:   a.Key,
-							Value: slog.StringValue(levelStr),
-						}
-					}
-					return a
-				},
-			})
-		} else {
-			// Create a null handler that discards all logs when debug is off and file logging failed
-			handler = &NullHandler{level: logLevel}
-		}
+		// Use only file handler when debug flag is not set
+		return fileHandler
 	}
 
-	// Set global logger
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
+	// Fall back to console-only logging if file couldn't be opened
+	// Only show logs in console if debug flag is set
+	if debugFlag {
+		return createColoredTextHandler(os.Stderr, logLevel)
+	}
 
-	// Log startup information
-	slog.Info("Application started",
-		"version", viper.GetString("version"),
-		"log_level", logLevel.String(),
-		"config_file", viper.ConfigFileUsed())
+	// Create a null handler that discards all logs when debug is off and file logging failed
+	return &NullHandler{level: logLevel}
 }
 
 // NullHandler is a slog.Handler that discards all logs
@@ -325,19 +317,21 @@ func (h *MultiHandler) Handle(ctx context.Context, record slog.Record) error {
 // WithAttrs returns a new Handler whose attributes consist of both the
 // receiver's attributes and the arguments.
 func (h *MultiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	var handlers []slog.Handler
+	// Pre-allocate the handlers slice with the same capacity as the original
+	handlers := make([]slog.Handler, 0, len(h.handlers))
 	for _, handler := range h.handlers {
 		handlers = append(handlers, handler.WithAttrs(attrs))
 	}
-	return NewMultiHandler(handlers...)
+	return &MultiHandler{handlers: handlers}
 }
 
 // WithGroup returns a new Handler with the given group appended to
 // the receiver's existing groups.
 func (h *MultiHandler) WithGroup(name string) slog.Handler {
-	var handlers []slog.Handler
+	// Pre-allocate the handlers slice with the same capacity as the original
+	handlers := make([]slog.Handler, 0, len(h.handlers))
 	for _, handler := range h.handlers {
 		handlers = append(handlers, handler.WithGroup(name))
 	}
-	return NewMultiHandler(handlers...)
+	return &MultiHandler{handlers: handlers}
 }
