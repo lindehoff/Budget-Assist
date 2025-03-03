@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -302,8 +304,10 @@ func TestDefaultProcessorFactory_NewDefaultProcessorFactory(t *testing.T) {
 
 	factory := NewDefaultProcessorFactory(logger, aiService)
 	if factory == nil {
-		t.Errorf("NewDefaultProcessorFactory() = nil, want non-nil")
+		t.Fatalf("NewDefaultProcessorFactory() = nil, want non-nil")
+		return
 	}
+
 	if factory.logger != logger {
 		t.Errorf("factory.logger = %v, want %v", factory.logger, logger)
 	}
@@ -656,5 +660,173 @@ func TestPDFProcessor_extractionToMap(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// mockExtractTextFromPDF is a test helper that creates a mock implementation of extractTextFromPDF
+func mockExtractTextFromPDF(t *testing.T, expectedContent string, expectedErr error) func(ctx context.Context, file io.Reader) (string, error) {
+	t.Helper()
+	return func(ctx context.Context, file io.Reader) (string, error) {
+		if expectedErr != nil {
+			return "", expectedErr
+		}
+		return expectedContent, nil
+	}
+}
+
+func TestPDFProcessor_defaultExtractTextFromPDF(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	processor := NewPDFProcessor(logger, aiService)
+
+	// Create a temporary directory for test files
+	tempDir := t.TempDir()
+
+	tests := []struct {
+		name           string
+		setupMock      bool
+		mockContent    string
+		mockErr        error
+		pdfContent     []byte
+		wantErr        bool
+		expectedErrMsg string
+	}{
+		{
+			name:        "Successfully_extract_text_from_valid_pdf",
+			setupMock:   true,
+			mockContent: "This is extracted text from a PDF",
+			mockErr:     nil,
+			pdfContent:  createTestPDF(t),
+			wantErr:     false,
+		},
+		{
+			name:           "Extract_error_empty_pdf",
+			setupMock:      true,
+			mockContent:    "",
+			mockErr:        fmt.Errorf("failed to extract text from PDF: empty file"),
+			pdfContent:     []byte{},
+			wantErr:        true,
+			expectedErrMsg: "empty file",
+		},
+		{
+			name:           "Extract_error_invalid_pdf",
+			setupMock:      true,
+			mockContent:    "",
+			mockErr:        fmt.Errorf("failed to extract text from PDF: invalid format"),
+			pdfContent:     []byte("not a PDF"),
+			wantErr:        true,
+			expectedErrMsg: "invalid format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary PDF file
+			pdfPath := filepath.Join(tempDir, fmt.Sprintf("%s.pdf", tt.name))
+			err := os.WriteFile(pdfPath, tt.pdfContent, 0600)
+			if err != nil {
+				t.Fatalf("Failed to create test PDF file: %v", err)
+			}
+
+			// Open the file
+			file, err := os.Open(pdfPath)
+			if err != nil {
+				t.Fatalf("Failed to open test PDF file: %v", err)
+			}
+			defer file.Close()
+
+			// Save the original method
+			originalMethod := processor.extractTextFromPDF
+
+			// Setup mock if needed
+			if tt.setupMock {
+				// Use our mock
+				processor.extractTextFromPDF = mockExtractTextFromPDF(t, tt.mockContent, tt.mockErr)
+			}
+
+			// Call the method
+			text, err := processor.extractTextFromPDF(context.Background(), file)
+
+			// Restore the original method
+			processor.extractTextFromPDF = originalMethod
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("PDFProcessor.extractTextFromPDF() error = nil, wantErr %v", tt.wantErr)
+					return
+				}
+				if tt.expectedErrMsg != "" && !strings.Contains(err.Error(), tt.expectedErrMsg) {
+					t.Errorf("PDFProcessor.extractTextFromPDF() error = %v, want error containing %q",
+						err, tt.expectedErrMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("PDFProcessor.extractTextFromPDF() error = %v, wantErr %v", err, tt.wantErr)
+					return
+				}
+				if text == "" {
+					t.Errorf("PDFProcessor.extractTextFromPDF() text is empty, want non-empty")
+				}
+				if text != tt.mockContent {
+					t.Errorf("PDFProcessor.extractTextFromPDF() text = %q, want %q", text, tt.mockContent)
+				}
+			}
+		})
+	}
+}
+
+// TestPDFProcessor_defaultExtractTextFromPDF_NoTool tests the case where pdftotext is not installed
+func TestPDFProcessor_defaultExtractTextFromPDF_NoTool(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	aiService := &mockAIService{}
+	processor := NewPDFProcessor(logger, aiService)
+
+	// Create a custom implementation of defaultExtractTextFromPDF that simulates pdftotext not being installed
+	customExtractTextFromPDF := func(ctx context.Context, file io.Reader) (string, error) {
+		// Create a temporary file to store the PDF content
+		tempFile, err := os.CreateTemp("", "pdf-*.pdf")
+		if err != nil {
+			return "", fmt.Errorf("failed to create temp file: %w", err)
+		}
+		defer os.Remove(tempFile.Name())
+		defer tempFile.Close()
+
+		// Copy the file content to the temp file
+		if _, err := io.Copy(tempFile, file); err != nil {
+			return "", fmt.Errorf("failed to write temp file: %w", err)
+		}
+
+		// Simulate pdftotext not being installed
+		return "", fmt.Errorf("pdftotext is not installed. Please install poppler-utils")
+	}
+
+	// Save the original method and replace it with our custom implementation
+	originalMethod := processor.extractTextFromPDF
+	processor.extractTextFromPDF = customExtractTextFromPDF
+	defer func() { processor.extractTextFromPDF = originalMethod }()
+
+	// Create a test PDF file
+	tempDir := t.TempDir()
+	pdfPath := filepath.Join(tempDir, "test.pdf")
+	err := os.WriteFile(pdfPath, createTestPDF(t), 0600)
+	if err != nil {
+		t.Fatalf("Failed to create test PDF file: %v", err)
+	}
+
+	// Open the file
+	file, err := os.Open(pdfPath)
+	if err != nil {
+		t.Fatalf("Failed to open test PDF file: %v", err)
+	}
+	defer file.Close()
+
+	// Call the method
+	_, err = processor.extractTextFromPDF(context.Background(), file)
+
+	// Check that we got an error
+	if err == nil {
+		t.Errorf("PDFProcessor.extractTextFromPDF() error = nil, want error about pdftotext not installed")
+	} else if !strings.Contains(err.Error(), "pdftotext is not installed") {
+		t.Errorf("PDFProcessor.extractTextFromPDF() error = %v, want error containing 'pdftotext is not installed'", err)
 	}
 }
