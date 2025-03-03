@@ -1,82 +1,49 @@
 package ai
 
-import "fmt"
+import (
+	"fmt"
+)
 
-// Error represents a base error type for the AI package
-type Error struct {
-	Err     error
-	Code    string
-	Message string
+// Common errors
+var (
+	ErrEmptyDocument    = fmt.Errorf("empty document content")
+	ErrNoChoices        = fmt.Errorf("no choices in OpenAI response")
+	ErrEmptyContent     = fmt.Errorf("empty content in OpenAI response")
+	ErrTemplateNotFound = fmt.Errorf("template not found")
+	ErrInvalidOperation = fmt.Errorf("invalid operation")
+)
+
+// OperationError represents an error that occurred during an operation
+type OperationError struct {
+	Err       error
+	Operation string
+	Resource  string
 }
 
-func (e *Error) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("%s: %s: %v", e.Code, e.Message, e.Err)
+func (e *OperationError) Error() string {
+	if e.Resource != "" {
+		return fmt.Sprintf("%s operation failed for %q: %v", e.Operation, e.Resource, e.Err)
 	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+	return fmt.Sprintf("%s operation failed: %v", e.Operation, e.Err)
 }
 
-// StatusError represents an error with an HTTP status code
-type StatusError struct {
-	Err        error
-	Code       string
+// OpenAIError represents an error from the OpenAI API
+type OpenAIError struct {
+	Operation  string
 	Message    string
 	StatusCode int
 }
 
-func (e *StatusError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("%s (status %d): %s: %v", e.Code, e.StatusCode, e.Message, e.Err)
-	}
-	return fmt.Sprintf("%s (status %d): %s", e.Code, e.StatusCode, e.Message)
+func (e *OpenAIError) Error() string {
+	return fmt.Sprintf("OpenAI API error during %s operation (status %d): %s", e.Operation, e.StatusCode, e.Message)
 }
 
-// CategoryError represents an error related to category operations
-type CategoryError struct {
-	Err      error
-	Category string
-	Message  string
+// RateLimitError represents a rate limit error from the OpenAI API
+type RateLimitError struct {
+	Message    string
+	StatusCode int
 }
 
-func (e *CategoryError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("category %q error: %s: %v", e.Category, e.Message, e.Err)
-	}
-	return fmt.Sprintf("category %q error: %s", e.Category, e.Message)
-}
-
-// Common errors
-var (
-	ErrLowConfidence    = fmt.Errorf("prediction confidence below threshold")
-	ErrInvalidModel     = fmt.Errorf("invalid model specified")
-	ErrModelUnavailable = fmt.Errorf("AI model currently unavailable")
-	ErrInvalidInput     = fmt.Errorf("invalid input for AI processing")
-)
-
-// NewError creates a new Error instance with the given code and message
-func NewError(code, message string, err error) *Error {
-	return &Error{
-		Err:     err,
-		Code:    code,
-		Message: message,
-	}
-}
-
-// NewStatusError creates a new StatusError instance with the given code, message, and status code
-func NewStatusError(code string, statusCode int, message string, err error) *StatusError {
-	return &StatusError{
-		Err:        err,
-		Code:       code,
-		Message:    message,
-		StatusCode: statusCode,
-	}
-}
-
-// NewCategoryError creates a new CategoryError instance with the given category and message
-func NewCategoryError(category, message string, err error) *CategoryError {
-	return &CategoryError{
-		Err:      err,
-		Category: category,
-		Message:  message,
-	}
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("rate limit exceeded (status %d): %s", e.StatusCode, e.Message)
 }

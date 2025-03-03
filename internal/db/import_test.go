@@ -2,480 +2,460 @@ package db
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"math"
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
+
+	"gorm.io/gorm"
 )
 
-// mockCategoryImporter is a mock implementation of CategoryImporter for testing
-type mockCategoryImporter struct {
-	categoryTypes []*CategoryType
-	categories    []*Category
-	subcategories []*Subcategory
-	translations  []*Translation
-	shouldFail    bool
-	failOperation string
-}
-
-func (m *mockCategoryImporter) CreateCategory(ctx context.Context, name, description string, typeID uint, translations map[string]TranslationData, subcategoryIDs []uint) (*Category, error) {
-	if m.shouldFail && m.failOperation == "CreateCategory" {
-		return nil, fmt.Errorf("mock create category error")
-	}
-	cat := &Category{
-		Name:        name,
-		Description: description,
-		TypeID:      typeID,
-		IsActive:    true,
-	}
-	nextID := len(m.categories) + 1
-	if nextID <= 0 || uint(nextID) > math.MaxUint {
-		return nil, fmt.Errorf("integer overflow when generating category ID")
-	}
-	cat.ID = uint(nextID)
-	m.categories = append(m.categories, cat)
-
-	// Create translations
-	for lang, trans := range translations {
-		translation := &Translation{
-			EntityID:     cat.ID,
-			EntityType:   string(EntityTypeCategory),
-			LanguageCode: lang,
-			Name:         trans.Name,
-			Description:  trans.Description,
-		}
-		if err := m.CreateTranslation(ctx, translation); err != nil {
-			return nil, err
-		}
-	}
-
-	return cat, nil
-}
-
-func (m *mockCategoryImporter) CreateSubcategory(ctx context.Context, name, description string, isSystem bool, translations map[string]TranslationData) (*Subcategory, error) {
-	if m.shouldFail && m.failOperation == "CreateSubcategory" {
-		return nil, fmt.Errorf("mock create subcategory error")
-	}
-	subcat := &Subcategory{
-		Name:        translations[LangEN].Name, // Use English name as base name
-		Description: description,
-		IsSystem:    isSystem,
-		IsActive:    true,
-	}
-	nextID := len(m.subcategories) + 1
-	if nextID <= 0 || uint(nextID) > math.MaxUint {
-		return nil, fmt.Errorf("integer overflow when generating subcategory ID")
-	}
-	subcat.ID = uint(nextID)
-	m.subcategories = append(m.subcategories, subcat)
-
-	// Create translations
-	for lang, trans := range translations {
-		translation := &Translation{
-			EntityID:     subcat.ID,
-			EntityType:   string(EntityTypeSubcategory),
-			LanguageCode: lang,
-			Name:         trans.Name,
-			Description:  trans.Description,
-		}
-		if err := m.CreateTranslation(ctx, translation); err != nil {
-			return nil, err
-		}
-	}
-
-	return subcat, nil
-}
-
-func (m *mockCategoryImporter) CreateCategoryType(ctx context.Context, categoryType *CategoryType) error {
-	if m.shouldFail && m.failOperation == "CreateCategoryType" {
-		return fmt.Errorf("mock create category type error")
-	}
-	nextID := len(m.categoryTypes) + 1
-	if nextID <= 0 || uint(nextID) > math.MaxUint {
-		return fmt.Errorf("integer overflow when generating category type ID")
-	}
-	categoryType.ID = uint(nextID)
-	m.categoryTypes = append(m.categoryTypes, categoryType)
-	return nil
-}
-
-func (m *mockCategoryImporter) CreateTranslation(ctx context.Context, translation *Translation) error {
-	if m.shouldFail && m.failOperation == "CreateTranslation" {
-		return fmt.Errorf("mock create translation error")
-	}
-	m.translations = append(m.translations, translation)
-	return nil
-}
-
-func createTestCategoriesFile(t *testing.T, data *DefaultCategoriesData) string {
-	t.Helper()
-
-	// Create a temporary directory for the test
-	tempDir := t.TempDir()
-	defaultsDir := filepath.Join(tempDir, "defaults")
-	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
-		t.Fatalf("failed to create defaults directory: %v", err)
-	}
-
-	// Create the categories.json file
-	filePath := filepath.Join(defaultsDir, "categories.json")
-	jsonData, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		t.Fatalf("failed to marshal test data: %v", err)
-	}
-
-	if err := os.WriteFile(filePath, jsonData, 0600); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	// Change working directory to the temp dir
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("failed to change working directory: %v", err)
-	}
-
-	return tempDir
-}
-
-func Test_Successfully_import_default_categories(t *testing.T) {
-	t.Parallel()
-
-	testData := &DefaultCategoriesData{
-		CategoryTypes: []struct {
-			Name         string                     `json:"name"`
-			Description  string                     `json:"description"`
-			IsMultiple   bool                       `json:"isMultiple"`
-			Translations map[string]TranslationData `json:"translations"`
-		}{
-			{
-				Name:        "Test Type",
-				Description: "Test Description",
-				IsMultiple:  true,
-				Translations: map[string]TranslationData{
-					LangEN: {Name: "Test Type EN", Description: "Test Description EN"},
-					"sv":   {Name: "Test Type SV", Description: "Test Description SV"},
-				},
-			},
-		},
-		Categories: []struct {
-			Name          string                     `json:"name"`
-			Description   string                     `json:"description"`
-			TypeID        uint                       `json:"typeId"`
-			Translations  map[string]TranslationData `json:"translations"`
-			Subcategories []struct {
-				Name         string                     `json:"name"`
-				Description  string                     `json:"description"`
-				Translations map[string]TranslationData `json:"translations"`
-			} `json:"subcategories"`
-		}{
-			{
-				Name:        "Test Category",
-				Description: "Test Category Description",
-				TypeID:      1,
-				Translations: map[string]TranslationData{
-					LangEN: {Name: "Test Category EN", Description: "Test Category Description EN"},
-					"sv":   {Name: "Test Category SV", Description: "Test Category Description SV"},
-				},
-				Subcategories: []struct {
-					Name         string                     `json:"name"`
-					Description  string                     `json:"description"`
-					Translations map[string]TranslationData `json:"translations"`
-				}{
+func Test_ImportDefaultCategories(t *testing.T) {
+	tests := []struct {
+		name          string
+		jsonContent   string
+		setupFunc     func(t *testing.T, db *gorm.DB)
+		expectedError string
+		validateFunc  func(t *testing.T, db *gorm.DB)
+	}{
+		{
+			name: "Successfully_import_default_categories",
+			jsonContent: `{
+				"categoryTypes": [
 					{
-						Name:        "Test Subcategory",
-						Description: "Test Subcategory Description",
-						Translations: map[string]TranslationData{
-							LangEN: {Name: "Test Subcategory EN", Description: "Test Subcategory Description EN"},
-							"sv":   {Name: "Test Subcategory SV", Description: "Test Subcategory Description SV"},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Create test categories file
-	tempDir := createTestCategoriesFile(t, testData)
-	defer func() {
-		if err := os.Chdir(tempDir); err != nil {
-			t.Errorf("failed to restore working directory: %v", err)
-		}
-	}()
-
-	// Create mock importer
-	importer := &mockCategoryImporter{}
-
-	// Run import
-	if err := ImportDefaultCategories(context.Background(), nil, importer); err != nil {
-		t.Fatalf("ImportDefaultCategories() error = %v", err)
-	}
-
-	// Verify category types were created
-	if len(importer.categoryTypes) != 1 {
-		t.Errorf("expected 1 category type, got %d", len(importer.categoryTypes))
-	}
-	if ct := importer.categoryTypes[0]; ct.Name != "Test Type" {
-		t.Errorf("category type name = %q, want %q", ct.Name, "Test Type")
-	}
-
-	// Verify translations were created
-	expectedTranslations := 6 // 2 for category type, 2 for category, 2 for subcategory
-	if len(importer.translations) != expectedTranslations {
-		t.Errorf("expected %d translations, got %d", expectedTranslations, len(importer.translations))
-		for i, trans := range importer.translations {
-			t.Logf("Translation %d: EntityType=%s, LanguageCode=%s, Name=%s", i+1, trans.EntityType, trans.LanguageCode, trans.Name)
-		}
-	}
-
-	// Count translations by entity type
-	translationsByType := make(map[string]int)
-	for _, trans := range importer.translations {
-		translationsByType[trans.EntityType]++
-	}
-	for entityType, count := range translationsByType {
-		if count != 2 {
-			t.Errorf("expected 2 translations for %s, got %d", entityType, count)
-		}
-	}
-
-	// Verify subcategories were created
-	if len(importer.subcategories) != 1 {
-		t.Errorf("expected 1 subcategory, got %d", len(importer.subcategories))
-	} else if sc := importer.subcategories[0]; sc.Name != "Test Subcategory EN" {
-		t.Errorf("subcategory name = %q, want %q", sc.Name, "Test Subcategory EN")
-	}
-
-	// Verify categories were created
-	if len(importer.categories) != 1 {
-		t.Errorf("expected 1 category, got %d", len(importer.categories))
-	} else if c := importer.categories[0]; c.Name != "Test Category" {
-		t.Errorf("category name = %q, want %q", c.Name, "Test Category")
-	}
-}
-
-func Test_Import_error_missing_categories_file(t *testing.T) {
-	t.Parallel()
-
-	// Create a temporary directory without categories.json
-	tempDir := t.TempDir()
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("failed to change working directory: %v", err)
-	}
-	defer func() {
-		if err := os.Chdir(tempDir); err != nil {
-			t.Errorf("failed to restore working directory: %v", err)
-		}
-	}()
-
-	importer := &mockCategoryImporter{}
-	err := ImportDefaultCategories(context.Background(), nil, importer)
-	if err == nil {
-		t.Error("expected error for missing categories.json, got nil")
-	}
-}
-
-func Test_Import_error_invalid_json(t *testing.T) {
-	t.Parallel()
-
-	// Create a temporary directory
-	tempDir := t.TempDir()
-	defaultsDir := filepath.Join(tempDir, "defaults")
-	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
-		t.Fatalf("failed to create defaults directory: %v", err)
-	}
-
-	// Create invalid JSON file
-	filePath := filepath.Join(defaultsDir, "categories.json")
-	if err := os.WriteFile(filePath, []byte("{invalid json"), 0600); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("failed to change working directory: %v", err)
-	}
-	defer func() {
-		if err := os.Chdir(tempDir); err != nil {
-			t.Errorf("failed to restore working directory: %v", err)
-		}
-	}()
-
-	importer := &mockCategoryImporter{}
-	err := ImportDefaultCategories(context.Background(), nil, importer)
-	if err == nil {
-		t.Error("expected error for invalid JSON, got nil")
-	}
-}
-
-func Test_Import_error_create_category_type(t *testing.T) {
-	t.Parallel()
-
-	testData := &DefaultCategoriesData{
-		CategoryTypes: []struct {
-			Name         string                     `json:"name"`
-			Description  string                     `json:"description"`
-			IsMultiple   bool                       `json:"isMultiple"`
-			Translations map[string]TranslationData `json:"translations"`
-		}{
-			{
-				Name:        "Test Type",
-				Description: "Test Description",
-				IsMultiple:  true,
-				Translations: map[string]TranslationData{
-					LangEN: {Name: "Test Type EN", Description: "Test Description EN"},
-				},
-			},
-		},
-	}
-
-	tempDir := createTestCategoriesFile(t, testData)
-	defer func() {
-		if err := os.Chdir(tempDir); err != nil {
-			t.Errorf("failed to restore working directory: %v", err)
-		}
-	}()
-
-	importer := &mockCategoryImporter{
-		shouldFail:    true,
-		failOperation: "CreateCategoryType",
-	}
-
-	err := ImportDefaultCategories(context.Background(), nil, importer)
-	if err == nil {
-		t.Error("expected error for create category type failure, got nil")
-	}
-}
-
-func Test_Import_error_create_translation(t *testing.T) {
-	t.Parallel()
-
-	testData := &DefaultCategoriesData{
-		CategoryTypes: []struct {
-			Name         string                     `json:"name"`
-			Description  string                     `json:"description"`
-			IsMultiple   bool                       `json:"isMultiple"`
-			Translations map[string]TranslationData `json:"translations"`
-		}{
-			{
-				Name:        "Test Type",
-				Description: "Test Description",
-				IsMultiple:  true,
-				Translations: map[string]TranslationData{
-					LangEN: {Name: "Test Type EN", Description: "Test Description EN"},
-				},
-			},
-		},
-	}
-
-	tempDir := createTestCategoriesFile(t, testData)
-	defer func() {
-		if err := os.Chdir(tempDir); err != nil {
-			t.Errorf("failed to restore working directory: %v", err)
-		}
-	}()
-
-	importer := &mockCategoryImporter{
-		shouldFail:    true,
-		failOperation: "CreateTranslation",
-	}
-
-	err := ImportDefaultCategories(context.Background(), nil, importer)
-	if err == nil {
-		t.Error("expected error for create translation failure, got nil")
-	}
-}
-
-func Test_Import_error_create_subcategory(t *testing.T) {
-	t.Parallel()
-
-	testData := &DefaultCategoriesData{
-		Categories: []struct {
-			Name          string                     `json:"name"`
-			Description   string                     `json:"description"`
-			TypeID        uint                       `json:"typeId"`
-			Translations  map[string]TranslationData `json:"translations"`
-			Subcategories []struct {
-				Name         string                     `json:"name"`
-				Description  string                     `json:"description"`
-				Translations map[string]TranslationData `json:"translations"`
-			} `json:"subcategories"`
-		}{
-			{
-				Name:   "Test Category",
-				TypeID: 1,
-				Subcategories: []struct {
-					Name         string                     `json:"name"`
-					Description  string                     `json:"description"`
-					Translations map[string]TranslationData `json:"translations"`
-				}{
+						"name": "Test Type",
+						"description": "Test Description",
+						"isMultiple": true
+					}
+				],
+				"subcategories": [
 					{
-						Name: "Test Subcategory",
-						Translations: map[string]TranslationData{
-							LangEN: {Name: "Test Subcategory EN", Description: "Test Description EN"},
-						},
-					},
-				},
+						"name": "Test Subcategory",
+						"description": "Test Subcategory Description",
+						"tags": ["tag1", "tag2"]
+					}
+				],
+				"categories": [
+					{
+						"name": "Test Category",
+						"description": "Test Category Description",
+						"type": "Test Type",
+						"subcategories": ["Test Subcategory"]
+					}
+				]
+			}`,
+			validateFunc: func(t *testing.T, db *gorm.DB) {
+				// Verify category type
+				var categoryType CategoryType
+				if err := db.Where("name = ?", "Test Type").First(&categoryType).Error; err != nil {
+					t.Errorf("failed to find category type: %v", err)
+					return
+				}
+
+				// Verify category
+				var category Category
+				if err := db.Where("name = ?", "Test Category").First(&category).Error; err != nil {
+					t.Errorf("failed to find category: %v", err)
+					return
+				}
+
+				// Verify subcategory
+				var subcategory Subcategory
+				if err := db.Where("name = ?", "Test Subcategory").First(&subcategory).Error; err != nil {
+					t.Errorf("failed to find subcategory: %v", err)
+					return
+				}
+
+				// Verify category-subcategory link
+				var link CategorySubcategory
+				if err := db.Where("category_id = ? AND subcategory_id = ?", category.ID, subcategory.ID).First(&link).Error; err != nil {
+					t.Errorf("failed to find category-subcategory link: %v", err)
+					return
+				}
+
+				// Verify tags
+				var tags []Tag
+				if err := db.Model(&subcategory).Association("Tags").Find(&tags); err != nil {
+					t.Errorf("failed to find tags: %v", err)
+					return
+				}
+				if len(tags) != 2 {
+					t.Errorf("expected 2 tags, got %d", len(tags))
+				}
+			},
+		},
+		{
+			name: "Import_error_missing_categories_file",
+			// No jsonContent means no file will be created
+			expectedError: "failed to read categories file: no file found in any location",
+		},
+		{
+			name: "Import_error_invalid_json",
+			jsonContent: `{
+				"categoryTypes": [
+					{
+						"name": "Test Type"
+						"description": "Test Description",
+					}
+				]
+			}`,
+			expectedError: "failed to parse categories file",
+		},
+		{
+			name: "Import_error_duplicate_category_type",
+			jsonContent: `{
+				"categoryTypes": [
+					{
+						"name": "Duplicate Type",
+						"description": "Test Description",
+						"isMultiple": true
+					}
+				],
+				"subcategories": [],
+				"categories": []
+			}`,
+			validateFunc: func(t *testing.T, db *gorm.DB) {
+				// Verify no category types exist
+				var count int64
+				if err := db.Model(&CategoryType{}).Count(&count).Error; err != nil {
+					t.Errorf("failed to count category types: %v", err)
+					return
+				}
+				if count != 1 {
+					t.Errorf("expected 1 category type, got %d", count)
+					return
+				}
+
+				// Verify it's the expected one
+				var categoryType CategoryType
+				if err := db.Where("name = ?", "Duplicate Type").First(&categoryType).Error; err != nil {
+					t.Errorf("failed to find category type: %v", err)
+					return
+				}
+			},
+		},
+		{
+			name: "Successfully_skip_import_when_categories_exist",
+			setupFunc: func(t *testing.T, db *gorm.DB) {
+				// Create a category type
+				categoryType := &CategoryType{
+					Name:        "Existing Type",
+					Description: "Original Description",
+					IsMultiple:  false,
+				}
+				if err := db.Create(categoryType).Error; err != nil {
+					t.Fatalf("failed to create category type: %v", err)
+				}
+			},
+			jsonContent: `{
+				"categoryTypes": [
+					{
+						"name": "Test Type",
+						"description": "Test Description",
+						"isMultiple": true
+					}
+				],
+				"subcategories": [],
+				"categories": []
+			}`,
+			validateFunc: func(t *testing.T, db *gorm.DB) {
+				// Verify only the original category type exists
+				var count int64
+				if err := db.Model(&CategoryType{}).Count(&count).Error; err != nil {
+					t.Errorf("failed to count category types: %v", err)
+					return
+				}
+				if count != 1 {
+					t.Errorf("expected 1 category type, got %d", count)
+					return
+				}
+
+				// Verify it's the original one
+				var categoryType CategoryType
+				if err := db.Where("name = ?", "Existing Type").First(&categoryType).Error; err != nil {
+					t.Errorf("failed to find original category type: %v", err)
+					return
+				}
 			},
 		},
 	}
 
-	tempDir := createTestCategoriesFile(t, testData)
-	defer func() {
-		if err := os.Chdir(tempDir); err != nil {
-			t.Errorf("failed to restore working directory: %v", err)
-		}
-	}()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary directory for each test
+			tempDir := t.TempDir()
+			origDir, err := os.Getwd()
+			if err != nil {
+				t.Fatalf("failed to get current directory: %v", err)
+			}
 
-	importer := &mockCategoryImporter{
-		shouldFail:    true,
-		failOperation: "CreateSubcategory",
-	}
+			// Change to temp directory and ensure we change back
+			if err := os.Chdir(tempDir); err != nil {
+				t.Fatalf("failed to change to temp directory: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := os.Chdir(origDir); err != nil {
+					t.Errorf("failed to restore working directory: %v", err)
+				}
+			})
 
-	err := ImportDefaultCategories(context.Background(), nil, importer)
-	if err == nil {
-		t.Error("expected error for create subcategory failure, got nil")
+			// Create test database
+			store, db := createTestStore(t)
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("failed to close store: %v", err)
+				}
+			})
+
+			// Clean database
+			cleanupDatabase(t, db)
+
+			// Run setup if provided
+			if tt.setupFunc != nil {
+				tt.setupFunc(t, db)
+			}
+
+			// Create categories.json if content provided
+			if tt.jsonContent != "" {
+				if err := os.WriteFile("categories.json", []byte(tt.jsonContent), 0600); err != nil {
+					t.Fatalf("failed to write test file: %v", err)
+				}
+			}
+
+			// Run the import
+			err = ImportDefaultCategories(context.TODO(), db)
+
+			// Validate error if expected
+			if tt.expectedError != "" {
+				if err == nil {
+					t.Error("expected error but got nil")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.expectedError) {
+					t.Errorf("expected error containing %q, got %v", tt.expectedError, err)
+					return
+				}
+				return
+			}
+
+			// If no error expected, validate success
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			// Run validation if provided
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, db)
+			}
+		})
 	}
 }
 
-func Test_Import_error_create_category(t *testing.T) {
-	t.Parallel()
+func Test_ImportDefaultPrompts(t *testing.T) {
+	tests := []struct {
+		name          string
+		jsonContent   string
+		setupFunc     func(t *testing.T, db *gorm.DB)
+		expectedError string
+		validateFunc  func(t *testing.T, db *gorm.DB)
+	}{
+		{
+			name: "Successfully import default prompts",
+			jsonContent: `{
+				"prompts": [
+					{
+						"type": "transaction_categorization",
+						"name": "Test Prompt EN",
+						"system_prompt": "You are a helpful assistant",
+						"user_prompt": "Please categorize: {{.Description}}",
+						"version": "1.0",
+						"is_active": true
+					}
+				]
+			}`,
+			setupFunc: func(t *testing.T, db *gorm.DB) {
+				// No setup needed
+			},
+			expectedError: "",
+			validateFunc: func(t *testing.T, db *gorm.DB) {
+				// Verify prompt was created
+				var prompt Prompt
+				if err := db.Where("name = ?", "Test Prompt EN").First(&prompt).Error; err != nil {
+					t.Errorf("failed to find prompt: %v", err)
+					return
+				}
 
-	testData := &DefaultCategoriesData{
-		Categories: []struct {
-			Name          string                     `json:"name"`
-			Description   string                     `json:"description"`
-			TypeID        uint                       `json:"typeId"`
-			Translations  map[string]TranslationData `json:"translations"`
-			Subcategories []struct {
-				Name         string                     `json:"name"`
-				Description  string                     `json:"description"`
-				Translations map[string]TranslationData `json:"translations"`
-			} `json:"subcategories"`
-		}{
-			{
-				Name:   "Test Category",
-				TypeID: 1,
-				Translations: map[string]TranslationData{
-					LangEN: {Name: "Test Category EN", Description: "Test Description EN"},
-				},
+				// Verify all fields
+				if prompt.Type != "transaction_categorization" {
+					t.Errorf("expected type %q, got %q", "transaction_categorization", prompt.Type)
+				}
+				if prompt.SystemPrompt != "You are a helpful assistant" {
+					t.Errorf("expected system prompt %q, got %q", "You are a helpful assistant", prompt.SystemPrompt)
+				}
+				if prompt.UserPrompt != "Please categorize: {{.Description}}" {
+					t.Errorf("expected user prompt %q, got %q", "Please categorize: {{.Description}}", prompt.UserPrompt)
+				}
+				if prompt.Version != "1.0" {
+					t.Errorf("expected version %q, got %q", "1.0", prompt.Version)
+				}
+				if !prompt.IsActive {
+					t.Error("expected prompt to be active")
+				}
+			},
+		},
+		{
+			name: "Import_error_missing_prompts_file",
+			// No jsonContent means no file will be created
+			expectedError: "failed to read prompts file: no file found in any location",
+		},
+		{
+			name: "Import_error_invalid_json",
+			jsonContent: `{
+				"prompts": [
+					{
+						"type": "transaction_categorization"
+						"name": "Test Prompt",
+					}
+				]
+			}`,
+			expectedError: "failed to parse prompts file",
+		},
+		{
+			name: "Successfully_skip_import_when_prompts_exist",
+			setupFunc: func(t *testing.T, db *gorm.DB) {
+				// Create a prompt
+				prompt := &Prompt{
+					Type:         "existing",
+					Name:         "Existing Prompt",
+					Description:  "Original Description",
+					SystemPrompt: "Original System Prompt",
+					UserPrompt:   "Original User Prompt",
+					Version:      "1.0",
+					IsActive:     true,
+				}
+				if err := db.Create(prompt).Error; err != nil {
+					t.Fatalf("failed to create prompt: %v", err)
+				}
+			},
+			jsonContent: `{
+				"prompts": [
+					{
+						"type": "transaction_categorization",
+						"name": "Test Prompt",
+						"description": "Test Description",
+						"systemPrompt": "You are a helpful assistant",
+						"userPrompt": "Please help me",
+						"version": "1.0"
+					}
+				]
+			}`,
+			validateFunc: func(t *testing.T, db *gorm.DB) {
+				// Verify only the original prompt exists
+				var count int64
+				if err := db.Model(&Prompt{}).Count(&count).Error; err != nil {
+					t.Errorf("failed to count prompts: %v", err)
+					return
+				}
+				if count != 1 {
+					t.Errorf("expected 1 prompt, got %d", count)
+					return
+				}
+
+				// Verify it's the original one
+				var prompt Prompt
+				if err := db.Where("name = ?", "Existing Prompt").First(&prompt).Error; err != nil {
+					t.Errorf("failed to find original prompt: %v", err)
+					return
+				}
 			},
 		},
 	}
 
-	tempDir := createTestCategoriesFile(t, testData)
-	defer func() {
-		if err := os.Chdir(tempDir); err != nil {
-			t.Errorf("failed to restore working directory: %v", err)
-		}
-	}()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary directory for each test
+			tempDir := t.TempDir()
+			origDir, err := os.Getwd()
+			if err != nil {
+				t.Fatalf("failed to get current directory: %v", err)
+			}
 
-	importer := &mockCategoryImporter{
-		shouldFail:    true,
-		failOperation: "CreateCategory",
+			// Change to temp directory and ensure we change back
+			if err := os.Chdir(tempDir); err != nil {
+				t.Fatalf("failed to change to temp directory: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := os.Chdir(origDir); err != nil {
+					t.Errorf("failed to restore working directory: %v", err)
+				}
+			})
+
+			// Create test database
+			store, db := createTestStore(t)
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("failed to close store: %v", err)
+				}
+			})
+
+			// Clean database
+			cleanupDatabase(t, db)
+
+			// Run setup if provided
+			if tt.setupFunc != nil {
+				tt.setupFunc(t, db)
+			}
+
+			// Create prompts.json if content provided
+			if tt.jsonContent != "" {
+				if err := os.WriteFile("prompts.json", []byte(tt.jsonContent), 0600); err != nil {
+					t.Fatalf("failed to write test file: %v", err)
+				}
+			}
+
+			// Run the import
+			err = ImportDefaultPrompts(context.TODO(), db)
+
+			// Validate error if expected
+			if tt.expectedError != "" {
+				if err == nil {
+					t.Error("expected error but got nil")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.expectedError) {
+					t.Errorf("expected error containing %q, got %v", tt.expectedError, err)
+					return
+				}
+				return
+			}
+
+			// If no error expected, validate success
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			// Run validation if provided
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, db)
+			}
+		})
+	}
+}
+
+func cleanupDatabase(t *testing.T, db *gorm.DB) {
+	tables := []string{
+		"category_subcategories",
+		"subcategory_tags",
+		"categories",
+		"subcategories",
+		"category_types",
+		"tags",
 	}
 
-	err := ImportDefaultCategories(context.Background(), nil, importer)
-	if err == nil {
-		t.Error("expected error for create category failure, got nil")
+	for _, table := range tables {
+		if err := db.Exec("DELETE FROM " + table).Error; err != nil {
+			t.Fatalf("failed to clean up %s: %v", table, err)
+		}
 	}
 }

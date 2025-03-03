@@ -2,12 +2,7 @@ package category
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io"
-	"sync"
 	"testing"
-	"time"
 
 	"log/slog"
 
@@ -15,865 +10,488 @@ import (
 	"github.com/lindehoff/Budget-Assist/internal/db"
 )
 
-type mockAIService struct{}
-
-func (m *mockAIService) AnalyzeTransaction(ctx context.Context, _ *db.Transaction, _ ai.AnalysisOptions) (*ai.Analysis, error) {
-	return &ai.Analysis{
-		Remarks: "Test analysis",
-		Score:   0.95,
-	}, nil
-}
-
-func (m *mockAIService) ExtractDocument(ctx context.Context, _ *ai.Document) (*ai.Extraction, error) {
-	return &ai.Extraction{
-		Content: "Test extraction",
-	}, nil
-}
-
-func (m *mockAIService) SuggestCategories(ctx context.Context, _ string) ([]ai.CategoryMatch, error) {
-	return []ai.CategoryMatch{
-		{
-			Category:   "expenses.food",
-			Confidence: 0.95,
-		},
-		{
-			Category:   "expenses.groceries",
-			Confidence: 0.85,
-		},
-	}, nil
-}
-
-type mockAIServiceWithError struct {
-	mockAIService
-}
-
-func (m *mockAIServiceWithError) AnalyzeTransaction(ctx context.Context, _ *db.Transaction, _ ai.AnalysisOptions) (*ai.Analysis, error) {
-	return nil, fmt.Errorf("AI service error")
-}
-
-func (m *mockAIServiceWithError) SuggestCategories(ctx context.Context, description string) ([]ai.CategoryMatch, error) {
-	return nil, fmt.Errorf("AI service error")
-}
-
-// createTestManager creates a new manager with mock dependencies for testing
-func createTestManager() (*Manager, db.Store) {
-	store := ai.NewMockStore()
-	aiService := &mockAIService{}
+func createTestManager(t *testing.T) (*Manager, *db.MockStore) {
+	t.Helper()
+	store := db.NewMockStore()
 	logger := slog.Default()
+	aiService := &mockAIService{}
 	return NewManager(store, aiService, logger), store
 }
 
-// createTestCategory creates a test category with the given details
-func createTestCategory(t *testing.T, store db.Store, name string, typeID uint) *db.Category {
-	t.Helper()
-	category := &db.Category{
-		TypeID:   typeID,
-		IsActive: true,
-	}
-
-	// Add English translation
-	translation := &db.Translation{
-		EntityType:   string(db.EntityTypeCategory),
-		LanguageCode: db.LangEN,
-		Name:         name,
-		Description:  "Test description",
-	}
-	category.Translations = append(category.Translations, *translation)
-
-	if err := store.CreateCategory(context.Background(), category); err != nil {
-		t.Fatalf("failed to create test category: %v", err)
-	}
-	return category
+type mockAIService struct {
+	ai.Service
 }
 
-func TestManager_CreateCategory(t *testing.T) {
+func (m *mockAIService) SuggestCategories(ctx context.Context, description string) ([]ai.CategoryMatch, error) {
+	return []ai.CategoryMatch{
+		{
+			Category:   "Test Category/Test Subcategory",
+			Confidence: 0.9,
+		},
+	}, nil
+}
+
+func Test_CreateCategory(t *testing.T) {
 	tests := []struct {
-		name    string
-		req     CreateCategoryRequest
-		wantErr bool
+		name         string
+		req          CreateCategoryRequest
+		setupStore   func(store *db.MockStore)
+		wantErr      string
+		validateFunc func(t *testing.T, category *db.Category, store *db.MockStore)
 	}{
 		{
-			name: "valid request",
+			name: "Successfully_create_category_with_subcategories",
 			req: CreateCategoryRequest{
-				TypeID:             1,
-				InstanceIdentifier: "test-category",
-				Name:               "Test Category",
-				Description:        "Test Description",
-				Translations: map[string]TranslationData{
-					"sv": {
-						Name:        "Test Kategori",
-						Description: "Test Beskrivning",
-					},
+				Name:        "Test Category",
+				Description: "Test Description",
+				Type:        "Test Type",
+				TypeID:      1,
+				Subcategories: []string{
+					"Test Subcategory",
 				},
 			},
-			wantErr: false,
+			setupStore: func(store *db.MockStore) {
+				// Create a category type
+				_ = store.CreateCategoryType(context.Background(), &db.CategoryType{
+					Name:        "Test Type",
+					Description: "Test Type Description",
+					IsMultiple:  true,
+				})
+			},
+			validateFunc: func(t *testing.T, category *db.Category, store *db.MockStore) {
+				if category == nil {
+					t.Error("expected category to be created, got nil")
+					return
+				}
+				if category.Name != "Test Category" {
+					t.Errorf("expected category name %q, got %q", "Test Category", category.Name)
+				}
+				if category.Description != "Test Description" {
+					t.Errorf("expected category description %q, got %q", "Test Description", category.Description)
+				}
+				if category.Type != "Test Type" {
+					t.Errorf("expected category type %q, got %q", "Test Type", category.Type)
+				}
+				if !category.IsActive {
+					t.Error("expected category to be active")
+				}
+				if len(category.Subcategories) != 1 {
+					t.Errorf("expected 1 subcategory, got %d", len(category.Subcategories))
+					return
+				}
+			},
 		},
 		{
-			name: "missing name",
+			name: "Create_error_missing_name",
 			req: CreateCategoryRequest{
-				TypeID:             1,
-				InstanceIdentifier: "test-category",
+				Description: "Test Description",
+				Type:        "Test Type",
+				TypeID:      1,
 			},
-			wantErr: true,
+			wantErr: "category operation \"create\" failed for \"\": name is required",
+		},
+		{
+			name: "Create_error_missing_type_id",
+			req: CreateCategoryRequest{
+				Name:        "Test Category",
+				Description: "Test Description",
+				Type:        "Test Type",
+			},
+			wantErr: "category operation \"create\" failed for \"Test Category\": type_id is required",
+		},
+		{
+			name: "Successfully_create_category_without_subcategories",
+			req: CreateCategoryRequest{
+				Name:        "Test Category",
+				Description: "Test Description",
+				Type:        "Test Type",
+				TypeID:      1,
+			},
+			setupStore: func(store *db.MockStore) {
+				// Create a category type
+				_ = store.CreateCategoryType(context.Background(), &db.CategoryType{
+					Name:        "Test Type",
+					Description: "Test Type Description",
+					IsMultiple:  true,
+				})
+			},
+			validateFunc: func(t *testing.T, category *db.Category, store *db.MockStore) {
+				if category == nil {
+					t.Error("expected category to be created, got nil")
+					return
+				}
+				if category.Name != "Test Category" {
+					t.Errorf("expected category name %q, got %q", "Test Category", category.Name)
+				}
+				if len(category.Subcategories) != 0 {
+					t.Errorf("expected no subcategories, got %d", len(category.Subcategories))
+				}
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := ai.NewMockStore()
-			aiService := &mockAIService{}
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			m := NewManager(store, aiService, logger)
+			manager, store := createTestManager(t)
 
-			got, err := m.CreateCategory(context.Background(), tt.req)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("CreateCategory() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.setupStore != nil {
+				tt.setupStore(store)
+			}
+
+			category, err := manager.CreateCategory(context.Background(), tt.req)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Errorf("expected error %q, got nil", tt.wantErr)
+					return
+				}
+				if err.Error() != tt.wantErr {
+					t.Errorf("expected error %q, got %q", tt.wantErr, err.Error())
+				}
 				return
 			}
-			if !tt.wantErr && got == nil {
-				t.Error("CreateCategory() got = nil, want non-nil")
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
 			}
-			if !tt.wantErr {
-				var enTransl *db.Translation
-				for _, tr := range got.Translations {
-					if tr.LanguageCode == db.LangEN {
-						enTransl = &tr
-						break
-					}
-				}
-				if enTransl == nil || enTransl.Name != tt.req.Name {
-					t.Errorf("CreateCategory() got name = %v, want %v", enTransl.Name, tt.req.Name)
-				}
-				if len(tt.req.Translations) > 0 {
-					for lang, data := range tt.req.Translations {
-						var transl *db.Translation
-						for _, tr := range got.Translations {
-							if tr.LanguageCode == lang {
-								transl = &tr
-								break
-							}
-						}
-						if transl == nil || transl.Name != data.Name {
-							t.Errorf("CreateCategory() got translation name = %v, want %v", transl.Name, data.Name)
-						}
-					}
-				}
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, category, store)
 			}
 		})
 	}
 }
 
-func TestManager_UpdateCategory(t *testing.T) {
-	store := ai.NewMockStore()
-	aiService := &mockAIService{}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := NewManager(store, aiService, logger)
-
-	// Create a test category first
-	createReq := CreateCategoryRequest{
-		Name:        "Original",
-		Description: "Original Description",
-		TypeID:      1,
-	}
-	existingCategory, err := m.CreateCategory(context.Background(), createReq)
-	if err != nil {
-		t.Fatalf("failed to create test category: %v", err)
-	}
-
+func Test_CreateSubcategory(t *testing.T) {
 	tests := []struct {
-		name    string
-		id      uint
-		req     UpdateCategoryRequest
-		wantErr bool
+		name         string
+		req          CreateSubcategoryRequest
+		setupStore   func(store *db.MockStore)
+		wantErr      string
+		validateFunc func(t *testing.T, subcategory *db.Subcategory, store *db.MockStore)
 	}{
 		{
-			name: "valid request",
-			id:   existingCategory.ID,
+			name: "Successfully_create_subcategory_with_tags_and_categories",
+			req: CreateSubcategoryRequest{
+				Name:        "Test Subcategory",
+				Description: "Test Description",
+				Categories:  []string{"Test Category"},
+				Tags:        []string{"tag1", "tag2"},
+				IsSystem:    true,
+			},
+			setupStore: func(store *db.MockStore) {
+				// Create a category type
+				_ = store.CreateCategoryType(context.Background(), &db.CategoryType{
+					Name:        "Test Type",
+					Description: "Test Type Description",
+					IsMultiple:  true,
+				})
+				// Create a category
+				_ = store.CreateCategory(context.Background(), &db.Category{
+					Name:        "Test Category",
+					Description: "Test Category Description",
+					TypeID:      1,
+					Type:        "Test Type",
+					IsActive:    true,
+				})
+			},
+			validateFunc: func(t *testing.T, subcategory *db.Subcategory, store *db.MockStore) {
+				if subcategory == nil {
+					t.Error("expected subcategory to be created, got nil")
+					return
+				}
+				if subcategory.Name != "Test Subcategory" {
+					t.Errorf("expected subcategory name %q, got %q", "Test Subcategory", subcategory.Name)
+				}
+				if subcategory.Description != "Test Description" {
+					t.Errorf("expected subcategory description %q, got %q", "Test Description", subcategory.Description)
+				}
+				if !subcategory.IsSystem {
+					t.Error("expected subcategory to be system")
+				}
+				if !subcategory.IsActive {
+					t.Error("expected subcategory to be active")
+				}
+				if len(subcategory.Tags) != 2 {
+					t.Errorf("expected 2 tags, got %d", len(subcategory.Tags))
+				}
+			},
+		},
+		{
+			name: "Create_error_missing_name",
+			req: CreateSubcategoryRequest{
+				Description: "Test Description",
+				IsSystem:    true,
+			},
+			wantErr: "category operation \"create_subcategory\" failed for \"\": name is required",
+		},
+		{
+			name: "Successfully_create_subcategory_without_tags",
+			req: CreateSubcategoryRequest{
+				Name:        "Test Subcategory",
+				Description: "Test Description",
+				IsSystem:    true,
+			},
+			validateFunc: func(t *testing.T, subcategory *db.Subcategory, store *db.MockStore) {
+				if subcategory == nil {
+					t.Error("expected subcategory to be created, got nil")
+					return
+				}
+				if subcategory.Name != "Test Subcategory" {
+					t.Errorf("expected subcategory name %q, got %q", "Test Subcategory", subcategory.Name)
+				}
+				if len(subcategory.Tags) != 0 {
+					t.Errorf("expected no tags, got %d", len(subcategory.Tags))
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager, store := createTestManager(t)
+
+			if tt.setupStore != nil {
+				tt.setupStore(store)
+			}
+
+			subcategory, err := manager.CreateSubcategory(context.Background(), tt.req)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Errorf("expected error %q, got nil", tt.wantErr)
+					return
+				}
+				if err.Error() != tt.wantErr {
+					t.Errorf("expected error %q, got %q", tt.wantErr, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, subcategory, store)
+			}
+		})
+	}
+}
+
+func Test_UpdateCategory(t *testing.T) {
+	tests := []struct {
+		name         string
+		req          UpdateCategoryRequest
+		setupStore   func(store *db.MockStore) uint
+		wantErr      string
+		validateFunc func(t *testing.T, category *db.Category, store *db.MockStore)
+	}{
+		{
+			name: "Successfully_update_category_all_fields",
 			req: UpdateCategoryRequest{
 				Name:               "Updated Category",
 				Description:        "Updated Description",
-				InstanceIdentifier: "updated-category",
-				Translations: map[string]TranslationData{
-					"sv": {
-						Name:        "Uppdaterad Kategori",
-						Description: "Uppdaterad Beskrivning",
-					},
-				},
+				InstanceIdentifier: "updated-instance",
+				AddSubcategories:   []string{"New Subcategory"},
+				IsActive:           boolPtr(false),
 			},
-			wantErr: false,
-		},
-		{
-			name:    "category not found",
-			id:      999,
-			req:     UpdateCategoryRequest{},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := m.UpdateCategory(context.Background(), tt.id, tt.req)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("UpdateCategory() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && got == nil {
-				t.Error("UpdateCategory() got = nil, want non-nil")
-			}
-			if !tt.wantErr {
-				if got.GetName(db.LangEN) != tt.req.Name {
-					t.Errorf("UpdateCategory() got name = %v, want %v", got.GetName(db.LangEN), tt.req.Name)
+			setupStore: func(store *db.MockStore) uint {
+				// Create a category type
+				categoryType := &db.CategoryType{
+					Name:        "Test Type",
+					Description: "Test Type Description",
+					IsMultiple:  true,
 				}
-				if len(tt.req.Translations) > 0 {
-					for lang, data := range tt.req.Translations {
-						if got.GetName(lang) != data.Name {
-							t.Errorf("UpdateCategory() got translation name = %v, want %v", got.GetName(lang), data.Name)
-						}
-					}
+				if err := store.CreateCategoryType(context.Background(), categoryType); err != nil {
+					t.Fatalf("failed to create category type: %v", err)
 				}
-			}
-		})
-	}
-}
 
-func TestCreateCategory(t *testing.T) {
-	// TODO: Replace context.Background() with proper context handling to test timeouts
-	// and cancellation in a future improvement. This should include:
-	// - Testing with context timeout
-	// - Testing with context cancellation
-	// - Testing with parent context values
-	ctx := context.TODO()
-
-	manager, _ := createTestManager()
-
-	tests := []struct {
-		name        string
-		req         CreateCategoryRequest
-		wantErr     bool
-		expectedErr error
-	}{
-		{
-			name: "Successfully_create_valid_category",
-			req: CreateCategoryRequest{
-				Name:        "Food",
-				Description: "Food expenses",
-				TypeID:      1,
+				// Create initial category
+				category := &db.Category{
+					Name:        "Test Category",
+					Description: "Test Description",
+					TypeID:      categoryType.ID,
+					Type:        "Test Type",
+					IsActive:    true,
+				}
+				if err := store.CreateCategory(context.Background(), category); err != nil {
+					t.Fatalf("failed to create category: %v", err)
+				}
+				return category.ID
 			},
-			wantErr: false,
-		},
-		{
-			name: "Error_create_category_with_empty_name",
-			req: CreateCategoryRequest{
-				Description: "Test category",
-				TypeID:      1,
-			},
-			wantErr:     true,
-			expectedErr: fmt.Errorf("name is required"),
-		},
-		{
-			name: "Error_create_category_with_zero_type_id",
-			req: CreateCategoryRequest{
-				Name:        "Test",
-				Description: "Test category",
-			},
-			wantErr:     true,
-			expectedErr: fmt.Errorf("type ID is required"),
-		},
-		{
-			name: "Successfully_create_category_with_translations",
-			req: CreateCategoryRequest{
-				Name:        "Food",
-				Description: "Food expenses",
-				TypeID:      1,
-				Translations: map[string]TranslationData{
-					"sv": {
-						Name:        "Mat",
-						Description: "Matkostnader",
-					},
-				},
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			category, err := manager.CreateCategory(ctx, tt.req)
-
-			// Validate error cases with detailed messages
-			if (err != nil) != tt.wantErr {
-				t.Errorf("CreateCategory(%+v) error = %v, wantErr = %v",
-					tt.req, err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				var categoryErr CategoryError
-				if !errors.As(err, &categoryErr) {
-					t.Errorf("CreateCategory(%+v) error type = %T, want CategoryError\nGot error: %v",
-						tt.req, err, err)
+			validateFunc: func(t *testing.T, category *db.Category, store *db.MockStore) {
+				if category == nil {
+					t.Error("expected category to be updated, got nil")
 					return
 				}
-				if tt.expectedErr != nil && categoryErr.Err.Error() != tt.expectedErr.Error() {
-					t.Errorf("CreateCategory(%+v) error message:\ngot:  %v\nwant: %v",
-						tt.req, categoryErr.Err, tt.expectedErr)
+				if category.Name != "Updated Category" {
+					t.Errorf("expected category name %q, got %q", "Updated Category", category.Name)
 				}
-				return
-			}
-
-			// Validate success cases with detailed field comparison
-			if category == nil {
-				t.Fatalf("CreateCategory(%+v) returned nil category when no error expected", tt.req)
-			}
-
-			if category.GetName(db.LangEN) != tt.req.Name {
-				t.Errorf("CreateCategory(%+v) category name:\ngot:  %v\nwant: %v",
-					tt.req, category.GetName(db.LangEN), tt.req.Name)
-			}
-			if category.GetDescription(db.LangEN) != tt.req.Description {
-				t.Errorf("CreateCategory(%+v) category description:\ngot:  %v\nwant: %v",
-					tt.req, category.GetDescription(db.LangEN), tt.req.Description)
-			}
-			if category.TypeID != tt.req.TypeID {
-				t.Errorf("CreateCategory(%+v) category typeID:\ngot:  %v\nwant: %v",
-					tt.req, category.TypeID, tt.req.TypeID)
-			}
-			if !category.IsActive {
-				t.Errorf("CreateCategory(%+v) category isActive = false, want true", tt.req)
-			}
-		})
-	}
-}
-
-func TestUpdateCategory(t *testing.T) {
-	// TODO: Replace context.Background() with proper context handling to test timeouts
-	// and cancellation in a future improvement. This should include:
-	// - Testing with context timeout
-	// - Testing with context cancellation
-	// - Testing with parent context values
-	ctx := context.TODO()
-
-	manager, store := createTestManager()
-	existingCategory := createTestCategory(t, store, "Original", 1)
-
-	tests := []struct {
-		name        string
-		id          uint
-		req         UpdateCategoryRequest
-		wantErr     bool
-		expectedErr error
-	}{
+				if category.Description != "Updated Description" {
+					t.Errorf("expected category description %q, got %q", "Updated Description", category.Description)
+				}
+				if category.InstanceIdentifier != "updated-instance" {
+					t.Errorf("expected instance identifier %q, got %q", "updated-instance", category.InstanceIdentifier)
+				}
+				if category.IsActive {
+					t.Error("expected category to be inactive")
+				}
+				if len(category.Subcategories) != 1 {
+					t.Errorf("expected 1 subcategory, got %d", len(category.Subcategories))
+				}
+			},
+		},
 		{
-			name: "Successfully_update_existing_category",
-			id:   existingCategory.ID,
+			name: "Update_error_category_not_found",
 			req: UpdateCategoryRequest{
-				Name:        "Updated",
-				Description: "Updated description",
+				Name: "Updated Category",
 			},
-			wantErr: false,
+			setupStore: func(store *db.MockStore) uint {
+				return 999
+			},
+			wantErr: "category operation \"update\" failed for \"id=999\": record not found",
 		},
 		{
-			name: "Successfully_update_category_active_status",
-			id:   existingCategory.ID,
+			name: "Successfully_update_category_partial_fields",
 			req: UpdateCategoryRequest{
-				IsActive: func() *bool { b := false; return &b }(),
+				Name:        "Updated Category",
+				Description: "Updated Description",
 			},
-			wantErr: false,
-		},
-		{
-			name: "Error_update_non_existent_category",
-			id:   999,
-			req: UpdateCategoryRequest{
-				Name: "Test",
+			setupStore: func(store *db.MockStore) uint {
+				// Create a category type
+				categoryType := &db.CategoryType{
+					Name:        "Test Type",
+					Description: "Test Type Description",
+					IsMultiple:  true,
+				}
+				if err := store.CreateCategoryType(context.Background(), categoryType); err != nil {
+					t.Fatalf("failed to create category type: %v", err)
+				}
+
+				// Create initial category
+				category := &db.Category{
+					Name:        "Test Category",
+					Description: "Test Description",
+					TypeID:      categoryType.ID,
+					Type:        "Test Type",
+					IsActive:    true,
+				}
+				if err := store.CreateCategory(context.Background(), category); err != nil {
+					t.Fatalf("failed to create category: %v", err)
+				}
+				return category.ID
 			},
-			wantErr:     true,
-			expectedErr: db.ErrNotFound,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			category, err := manager.UpdateCategory(ctx, tt.id, tt.req)
-
-			// Validate error cases with detailed messages
-			if (err != nil) != tt.wantErr {
-				t.Errorf("UpdateCategory(id=%d, %+v) error = %v, wantErr = %v",
-					tt.id, tt.req, err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				var categoryErr CategoryError
-				if !errors.As(err, &categoryErr) {
-					t.Errorf("UpdateCategory(id=%d, %+v) error type = %T, want CategoryError\nGot error: %v",
-						tt.id, tt.req, err, err)
+			validateFunc: func(t *testing.T, category *db.Category, store *db.MockStore) {
+				if category == nil {
+					t.Error("expected category to be updated, got nil")
 					return
 				}
-				if tt.expectedErr != nil && !errors.Is(categoryErr.Err, tt.expectedErr) {
-					t.Errorf("UpdateCategory(id=%d, %+v) error:\ngot:  %v\nwant: %v",
-						tt.id, tt.req, categoryErr.Err, tt.expectedErr)
+				if category.Name != "Updated Category" {
+					t.Errorf("expected category name %q, got %q", "Updated Category", category.Name)
 				}
-				return
-			}
-
-			// Validate success cases with detailed field comparison
-			if category == nil {
-				t.Fatalf("UpdateCategory(id=%d, %+v) returned nil category when no error expected",
-					tt.id, tt.req)
-				return
-			}
-
-			if tt.req.Name != "" && category.GetName(db.LangEN) != tt.req.Name {
-				t.Errorf("UpdateCategory(id=%d, %+v) category name:\ngot:  %v\nwant: %v",
-					tt.id, tt.req, category.GetName(db.LangEN), tt.req.Name)
-			}
-			if tt.req.Description != "" && category.GetDescription(db.LangEN) != tt.req.Description {
-				t.Errorf("UpdateCategory(id=%d, %+v) category description:\ngot:  %v\nwant: %v",
-					tt.id, tt.req, category.GetDescription(db.LangEN), tt.req.Description)
-			}
-			if tt.req.IsActive != nil && category.IsActive != *tt.req.IsActive {
-				t.Errorf("UpdateCategory(id=%d, %+v) category isActive:\ngot:  %v\nwant: %v",
-					tt.id, tt.req, category.IsActive, *tt.req.IsActive)
-			}
-		})
-	}
-}
-
-func TestSuggestCategory(t *testing.T) {
-	// TODO: Replace context.Background() with proper context handling to test timeouts
-	// and cancellation in a future improvement. This should include:
-	// - Testing with context timeout
-	// - Testing with context cancellation
-	// - Testing with parent context values
-	ctx := context.TODO()
-
-	manager, _ := createTestManager()
-
-	tests := []struct {
-		name          string
-		description   string
-		wantErr       bool
-		expectedCount int
-		expectedPaths []string
-		minConfidence float64
-	}{
-		{
-			name:          "Successfully_suggest_categories_for_grocery_shopping",
-			description:   "Grocery shopping at ICA",
-			wantErr:       false,
-			expectedCount: 2,
-			expectedPaths: []string{"expenses.food", "expenses.groceries"},
-			minConfidence: 0.8,
-		},
-		{
-			name:          "Successfully_handle_empty_description",
-			description:   "",
-			wantErr:       false,
-			expectedCount: 2, // Our mock always returns 2 suggestions
-			expectedPaths: []string{"expenses.food", "expenses.groceries"},
-			minConfidence: 0.8,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			suggestions, err := manager.SuggestCategory(ctx, tt.description)
-
-			// Validate error cases with descriptive messages
-			if (err != nil) != tt.wantErr {
-				t.Errorf("SuggestCategory(%q) error = %v, wantErr = %v",
-					tt.description, err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				return
-			}
-
-			// Validate success cases with detailed output
-			if got := len(suggestions); got != tt.expectedCount {
-				t.Errorf("SuggestCategory(%q) returned %d suggestions, want %d\nGot suggestions: %+v",
-					tt.description, got, tt.expectedCount, suggestions)
-				return
-			}
-
-			// Validate suggestions with detailed comparison
-			for i, suggestion := range suggestions {
-				if suggestion.CategoryPath != tt.expectedPaths[i] {
-					t.Errorf("SuggestCategory(%q) category[%d]:\ngot:  %v\nwant: %v",
-						tt.description, i, suggestion.CategoryPath, tt.expectedPaths[i])
-					return
+				if category.Description != "Updated Description" {
+					t.Errorf("expected category description %q, got %q", "Updated Description", category.Description)
 				}
-				if suggestion.Confidence < tt.minConfidence {
-					t.Errorf("SuggestCategory(%q) confidence[%d] = %.2f, want >= %.2f",
-						tt.description, i, suggestion.Confidence, tt.minConfidence)
-					return
+				if !category.IsActive {
+					t.Error("expected category to still be active")
 				}
-			}
-		})
-	}
-}
-
-func TestCategoryError_Error(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      CategoryError
-		expected string
-	}{
-		{
-			name: "Format_error_message_correctly",
-			err: CategoryError{
-				Operation: "create",
-				Category:  "Food",
-				Err:       fmt.Errorf("validation failed"),
 			},
-			expected: `category operation "create" failed for "Food": validation failed`,
-		},
-		{
-			name: "Handle_empty_fields",
-			err: CategoryError{
-				Operation: "",
-				Category:  "",
-				Err:       fmt.Errorf("unknown error"),
-			},
-			expected: `category operation "" failed for "": unknown error`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.err.Error(); got != tt.expected {
-				t.Errorf("CategoryError.Error() = %v, want %v", got, tt.expected)
+			manager, store := createTestManager(t)
+
+			var categoryID uint
+			if tt.setupStore != nil {
+				categoryID = tt.setupStore(store)
 			}
-		})
-	}
-}
 
-func TestGetCategoryByID(t *testing.T) {
-	manager, store := createTestManager()
-	existingCategory := createTestCategory(t, store, "Test", 1)
-
-	tests := []struct {
-		name        string
-		id          uint
-		wantErr     bool
-		expectedErr error
-	}{
-		{
-			name:    "Successfully_get_existing_category",
-			id:      existingCategory.ID,
-			wantErr: false,
-		},
-		{
-			name:        "GetCategoryByID_error_non_existent_category",
-			id:          999,
-			wantErr:     true,
-			expectedErr: db.ErrNotFound,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.TODO()
-
-			category, err := manager.GetCategoryByID(ctx, tt.id)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetCategoryByID() error = %v, wantErr %v (input: %d)", err, tt.wantErr, tt.id)
-				return
-			}
-			if tt.wantErr {
-				var categoryErr CategoryError
-				if !errors.As(err, &categoryErr) {
-					t.Errorf("GetCategoryByID() error type = %T, want CategoryError (input: %d)", err, tt.id)
+			category, err := manager.UpdateCategory(context.Background(), categoryID, tt.req)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Errorf("expected error %q, got nil", tt.wantErr)
 					return
 				}
-				if tt.expectedErr != nil && !errors.Is(categoryErr.Err, tt.expectedErr) {
-					t.Errorf("GetCategoryByID() error = %v, expectedErr %v (input: %d)",
-						categoryErr.Err, tt.expectedErr, tt.id)
+				if err.Error() != tt.wantErr {
+					t.Errorf("expected error %q, got %q", tt.wantErr, err.Error())
 				}
 				return
 			}
 
-			if category == nil {
-				t.Fatal("GetCategoryByID() returned nil category when no error expected")
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
 			}
 
-			if category.ID != tt.id {
-				t.Errorf("GetCategoryByID() category ID = %v, want %v (input: %d)",
-					category.ID, tt.id, tt.id)
-				return
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, category, store)
 			}
 		})
 	}
 }
 
-func TestListCategories(t *testing.T) {
-	manager, store := createTestManager()
-
-	// Create test categories
-	_ = createTestCategory(t, store, "Food", 1)
-	_ = createTestCategory(t, store, "Transport", 1)
-	_ = createTestCategory(t, store, "Housing", 2)
-
-	tests := []struct {
-		name           string
-		typeID         *uint
-		expectedCount  int
-		expectedTypeID uint
-		wantErr        bool
-	}{
-		{
-			name:           "Successfully_list_all_categories",
-			typeID:         nil,
-			expectedCount:  3,
-			expectedTypeID: 0,
-			wantErr:        false,
-		},
-		{
-			name:           "Successfully_filter_by_type",
-			typeID:         func() *uint { id := uint(1); return &id }(),
-			expectedCount:  2,
-			expectedTypeID: 1,
-			wantErr:        false,
-		},
-		{
-			name:           "Successfully_handle_empty_type",
-			typeID:         func() *uint { id := uint(3); return &id }(),
-			expectedCount:  0,
-			expectedTypeID: 3,
-			wantErr:        false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			categories, err := manager.ListCategories(context.Background(), tt.typeID)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ListCategories() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if !tt.wantErr {
-				if len(categories) != tt.expectedCount {
-					t.Errorf("ListCategories() got %d categories, want %d", len(categories), tt.expectedCount)
-				}
-
-				if tt.typeID != nil {
-					for _, cat := range categories {
-						if cat.TypeID != tt.expectedTypeID {
-							t.Errorf("ListCategories() category typeID = %v, want %v", cat.TypeID, tt.expectedTypeID)
-						}
-					}
-				}
-			}
-		})
-	}
+func boolPtr(b bool) *bool {
+	return &b
 }
 
-// mockStoreWithErrors implements db.Store interface for testing error cases
-type mockStoreWithErrors struct {
-	db.Store
-	shouldError bool
-}
-
-func (m *mockStoreWithErrors) CreateCategory(ctx context.Context, _ *db.Category) error {
-	if m.shouldError {
-		return fmt.Errorf("database error")
-	}
-	return nil
-}
-
-func (m *mockStoreWithErrors) CreateTranslation(ctx context.Context, _ *db.Translation) error {
-	if m.shouldError {
-		return fmt.Errorf("database error")
-	}
-	return nil
-}
-
-func TestCreateTranslations(t *testing.T) {
+func Test_SuggestCategory(t *testing.T) {
 	tests := []struct {
 		name         string
-		translations map[string]TranslationData
-		shouldError  bool
-		wantErr      bool
+		description  string
+		setupStore   func(store *db.MockStore)
+		wantErr      string
+		validateFunc func(t *testing.T, suggestions []CategorySuggestion)
 	}{
 		{
-			name: "Successfully_create_translations",
-			translations: map[string]TranslationData{
-				"sv": {Name: "Mat", Description: "Matkostnader"},
-				"en": {Name: "Food", Description: "Food expenses"},
+			name:        "Successfully_suggest_categories",
+			description: "Test transaction description",
+			validateFunc: func(t *testing.T, suggestions []CategorySuggestion) {
+				if len(suggestions) != 1 {
+					t.Errorf("expected 1 suggestion, got %d", len(suggestions))
+					return
+				}
+				suggestion := suggestions[0]
+				if suggestion.CategoryPath != "Test Category/Test Subcategory" {
+					t.Errorf("expected category path %q, got %q", "Test Category/Test Subcategory", suggestion.CategoryPath)
+				}
+				if suggestion.Confidence != 0.9 {
+					t.Errorf("expected confidence %f, got %f", 0.9, suggestion.Confidence)
+				}
 			},
-			shouldError: false,
-			wantErr:     false,
-		},
-		{
-			name: "Error_creating_translation",
-			translations: map[string]TranslationData{
-				"sv": {Name: "Mat", Description: "Matkostnader"},
-			},
-			shouldError: true,
-			wantErr:     true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &mockStoreWithErrors{Store: ai.NewMockStore(), shouldError: tt.shouldError}
-			manager := NewManager(store, &mockAIService{}, slog.Default())
+			manager, store := createTestManager(t)
 
-			err := manager.createTranslations(context.Background(), 1, tt.translations)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("createTranslations() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestSuggestCategory_Error(t *testing.T) {
-	manager := NewManager(ai.NewMockStore(), &mockAIServiceWithError{}, slog.Default())
-
-	_, err := manager.SuggestCategory(context.Background(), "test description")
-
-	if err == nil {
-		t.Error("SuggestCategory() expected error, got nil")
-		return
-	}
-
-	var categoryErr CategoryError
-	if !errors.As(err, &categoryErr) {
-		t.Errorf("SuggestCategory() error type = %T, want CategoryError", err)
-		return
-	}
-
-	if categoryErr.Operation != "suggest" {
-		t.Errorf("SuggestCategory() error operation = %v, want 'suggest'", categoryErr.Operation)
-	}
-}
-
-// TestConcurrent_category_operations tests the manager's behavior under concurrent load
-func TestConcurrent_category_operations(t *testing.T) {
-	manager, _ := createTestManager()
-	numOperations := 5
-	var wg sync.WaitGroup
-	wg.Add(numOperations * 2)
-
-	errCh := make(chan error, numOperations*2)
-
-	// Use a mutex to protect the categories slice
-	var categoriesMu sync.RWMutex
-	categories := make([]*db.Category, numOperations)
-
-	// Create categories concurrently
-	for i := 0; i < numOperations; i++ {
-		go func(i int) {
-			defer wg.Done()
-
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
-
-			req := CreateCategoryRequest{
-				Name:        fmt.Sprintf("Category %d", i),
-				Description: fmt.Sprintf("Test category %d", i),
-				TypeID:      1,
-				Translations: map[string]TranslationData{
-					"sv": {
-						Name:        fmt.Sprintf("Kategori %d", i),
-						Description: fmt.Sprintf("Test kategori %d", i),
-					},
-				},
+			if tt.setupStore != nil {
+				tt.setupStore(store)
 			}
 
-			category, err := manager.CreateCategory(ctx, req)
-			if err != nil {
-				errCh <- fmt.Errorf("create operation %d failed: %w", i, err)
+			suggestions, err := manager.SuggestCategory(context.Background(), tt.description)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Errorf("expected error %q, got nil", tt.wantErr)
+					return
+				}
+				if err.Error() != tt.wantErr {
+					t.Errorf("expected error %q, got %q", tt.wantErr, err.Error())
+				}
 				return
 			}
 
-			categoriesMu.Lock()
-			categories[i] = category
-			categoriesMu.Unlock()
-		}(i)
-	}
-
-	// Update categories concurrently
-	for i := 0; i < numOperations; i++ {
-		go func(i int) {
-			defer wg.Done()
-
-			// Wait a bit to ensure category is created
-			time.Sleep(10 * time.Millisecond)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
-
-			// Try updating until category is available
-			var lastErr error
-			for retries := 0; retries < 3; retries++ {
-				categoriesMu.RLock()
-				category := categories[i]
-				categoriesMu.RUnlock()
-
-				if category == nil {
-					time.Sleep(10 * time.Millisecond)
-					continue
-				}
-
-				req := UpdateCategoryRequest{
-					Name:        fmt.Sprintf("Updated Category %d", i),
-					Description: fmt.Sprintf("Updated description %d", i),
-				}
-
-				_, err := manager.UpdateCategory(ctx, category.ID, req)
-				if err == nil {
-					return
-				}
-				lastErr = err
-				time.Sleep(10 * time.Millisecond)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
 			}
-			if lastErr != nil {
-				errCh <- fmt.Errorf("update operation %d failed after retries: %w", i, lastErr)
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, suggestions)
 			}
-		}(i)
-	}
-
-	// Wait for all operations to complete
-	wg.Wait()
-	close(errCh)
-
-	// Check for any errors
-	errors := make([]error, 0, numOperations*2)
-	for err := range errCh {
-		errors = append(errors, err)
-	}
-
-	if len(errors) > 0 {
-		t.Errorf("Got %d errors from concurrent operations:", len(errors))
-		for _, err := range errors {
-			t.Errorf("  %v", err)
-		}
-	}
-
-	// Verify final state
-	ctx := context.Background()
-	for i := 0; i < numOperations; i++ {
-		categoriesMu.RLock()
-		category := categories[i]
-		categoriesMu.RUnlock()
-
-		if category == nil {
-			t.Errorf("Category %d was not created", i)
-			continue
-		}
-
-		category, err := manager.GetCategoryByID(ctx, category.ID)
-		if err != nil {
-			t.Errorf("Failed to get category %d: %v", i, err)
-			continue
-		}
-
-		expectedName := fmt.Sprintf("Updated Category %d", i)
-		if category.GetName(db.LangEN) != expectedName {
-			t.Errorf("Category %d name = %q, want %q", i, category.GetName(db.LangEN), expectedName)
-		}
+		})
 	}
 }

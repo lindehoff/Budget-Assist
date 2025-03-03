@@ -2,18 +2,16 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/lindehoff/Budget-Assist/internal/db"
 )
 
 // PromptManager handles storage and management of prompt templates
 type PromptManager struct {
-	templates map[PromptType]*PromptTemplate
+	templates map[db.PromptType]*PromptTemplate
 	mu        sync.RWMutex
 	logger    *slog.Logger
 	store     db.Store
@@ -22,14 +20,14 @@ type PromptManager struct {
 // NewPromptManager creates a new prompt manager
 func NewPromptManager(store db.Store, logger *slog.Logger) *PromptManager {
 	return &PromptManager{
-		templates: make(map[PromptType]*PromptTemplate),
+		templates: make(map[db.PromptType]*PromptTemplate),
 		logger:    logger,
 		store:     store,
 	}
 }
 
 // GetPrompt retrieves a prompt template by type
-func (pm *PromptManager) GetPrompt(ctx context.Context, promptType PromptType) (*PromptTemplate, error) {
+func (pm *PromptManager) GetPrompt(ctx context.Context, promptType db.PromptType) (*PromptTemplate, error) {
 	// Try to get from cache first with read lock
 	pm.mu.RLock()
 	if template, ok := pm.templates[promptType]; ok && template.IsActive {
@@ -41,37 +39,20 @@ func (pm *PromptManager) GetPrompt(ctx context.Context, promptType PromptType) (
 	// Get from database
 	dbPrompt, err := pm.store.GetPromptByType(ctx, string(promptType))
 	if err != nil {
-		return nil, fmt.Errorf("prompt template not found for type: %s: %w", promptType, err)
+		return nil, err
 	}
 	if dbPrompt == nil {
 		return nil, fmt.Errorf("prompt template not found for type: %s", promptType)
 	}
 
 	template := &PromptTemplate{
-		Type:         PromptType(dbPrompt.Type),
+		Type:         dbPrompt.Type,
 		Name:         dbPrompt.Name,
+		Description:  dbPrompt.Description,
 		SystemPrompt: dbPrompt.SystemPrompt,
 		UserPrompt:   dbPrompt.UserPrompt,
 		Version:      dbPrompt.Version,
 		IsActive:     dbPrompt.IsActive,
-		CreatedAt:    dbPrompt.CreatedAt,
-		UpdatedAt:    dbPrompt.UpdatedAt,
-	}
-
-	// Unmarshal examples and rules if they exist
-	if dbPrompt.Examples != "" {
-		if err := json.Unmarshal([]byte(dbPrompt.Examples), &template.Examples); err != nil {
-			pm.logger.Error("failed to unmarshal examples",
-				"type", promptType,
-				"error", err)
-		}
-	}
-	if dbPrompt.Rules != "" {
-		if err := json.Unmarshal([]byte(dbPrompt.Rules), &template.Rules); err != nil {
-			pm.logger.Error("failed to unmarshal rules",
-				"type", promptType,
-				"error", err)
-		}
 	}
 
 	// Cache the template with write lock
@@ -94,47 +75,17 @@ func (pm *PromptManager) UpdatePrompt(ctx context.Context, template *PromptTempl
 	}
 
 	// Basic validation
-	if template.Type == "" {
-		return fmt.Errorf("prompt type is required")
-	}
-	if template.Name == "" {
-		return fmt.Errorf("prompt name is required")
-	}
-	if template.SystemPrompt == "" {
-		return fmt.Errorf("system prompt is required")
-	}
-	if template.UserPrompt == "" {
-		return fmt.Errorf("user prompt is required")
-	}
-
-	// Convert examples to JSON if present
-	var examplesJSON string
-	if len(template.Examples) > 0 {
-		data, err := json.Marshal(template.Examples)
-		if err != nil {
-			return fmt.Errorf("failed to marshal examples: %w", err)
-		}
-		examplesJSON = string(data)
-	}
-
-	// Convert rules to JSON if present
-	var rulesJSON string
-	if len(template.Rules) > 0 {
-		data, err := json.Marshal(template.Rules)
-		if err != nil {
-			return fmt.Errorf("failed to marshal rules: %w", err)
-		}
-		rulesJSON = string(data)
+	if err := template.Validate(); err != nil {
+		return err
 	}
 
 	// Create or update the prompt in the database
 	dbPrompt := &db.Prompt{
-		Type:         string(template.Type),
+		Type:         template.Type,
 		Name:         template.Name,
+		Description:  template.Description,
 		SystemPrompt: template.SystemPrompt,
 		UserPrompt:   template.UserPrompt,
-		Examples:     examplesJSON,
-		Rules:        rulesJSON,
 		Version:      template.Version,
 		IsActive:     template.IsActive,
 	}
@@ -151,114 +102,25 @@ func (pm *PromptManager) UpdatePrompt(ctx context.Context, template *PromptTempl
 	return nil
 }
 
-// ListPrompts returns all active prompt templates
-func (pm *PromptManager) ListPrompts(ctx context.Context) []*PromptTemplate {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-
-	// Get from database
+// ListPrompts returns all prompt templates
+func (pm *PromptManager) ListPrompts(ctx context.Context) ([]*PromptTemplate, error) {
 	dbPrompts, err := pm.store.ListPrompts(ctx)
 	if err != nil {
-		pm.logger.Error("failed to list prompts from database",
-			"error", err)
-		return nil
+		return nil, fmt.Errorf("failed to list prompts: %w", err)
 	}
 
-	templates := make([]*PromptTemplate, 0, len(dbPrompts))
-	for _, dbPrompt := range dbPrompts {
-		if !dbPrompt.IsActive {
-			continue
-		}
-
-		template := &PromptTemplate{
-			Type:         PromptType(dbPrompt.Type),
+	templates := make([]*PromptTemplate, len(dbPrompts))
+	for i, dbPrompt := range dbPrompts {
+		templates[i] = &PromptTemplate{
+			Type:         dbPrompt.Type,
 			Name:         dbPrompt.Name,
+			Description:  dbPrompt.Description,
 			SystemPrompt: dbPrompt.SystemPrompt,
 			UserPrompt:   dbPrompt.UserPrompt,
 			Version:      dbPrompt.Version,
 			IsActive:     dbPrompt.IsActive,
-			CreatedAt:    dbPrompt.CreatedAt,
-			UpdatedAt:    dbPrompt.UpdatedAt,
 		}
-
-		// Unmarshal examples and rules if they exist
-		if dbPrompt.Examples != "" {
-			if err := json.Unmarshal([]byte(dbPrompt.Examples), &template.Examples); err != nil {
-				pm.logger.Error("failed to unmarshal examples",
-					"type", dbPrompt.Type,
-					"error", err)
-			}
-		}
-		if dbPrompt.Rules != "" {
-			if err := json.Unmarshal([]byte(dbPrompt.Rules), &template.Rules); err != nil {
-				pm.logger.Error("failed to unmarshal rules",
-					"type", dbPrompt.Type,
-					"error", err)
-			}
-		}
-
-		templates = append(templates, template)
-		pm.templates[template.Type] = template
 	}
 
-	return templates
-}
-
-// DeactivatePrompt deactivates a prompt template
-func (pm *PromptManager) DeactivatePrompt(ctx context.Context, promptType PromptType) error {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
-	// Get from database
-	dbPrompt, err := pm.store.GetPromptByType(ctx, string(promptType))
-	if err != nil {
-		return fmt.Errorf("prompt template not found: %s", promptType)
-	}
-	if dbPrompt == nil {
-		return fmt.Errorf("prompt template not found: %s", promptType)
-	}
-
-	dbPrompt.IsActive = false
-	dbPrompt.UpdatedAt = time.Now()
-
-	if err := pm.store.UpdatePrompt(ctx, dbPrompt); err != nil {
-		return fmt.Errorf("failed to update prompt in database: %w", err)
-	}
-
-	// Update cache
-	if template, ok := pm.templates[promptType]; ok {
-		template.IsActive = false
-		template.UpdatedAt = dbPrompt.UpdatedAt
-	}
-
-	pm.logger.Info("prompt template deactivated",
-		"type", promptType,
-		"version", dbPrompt.Version)
-
-	return nil
-}
-
-// incrementVersion increments the version number (e.g., "1.0.9" -> "1.1.0" for minor, "1.9.9" -> "2.0.0" for major)
-func incrementVersion(version string) string {
-	var major, minor, patch int
-	if _, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch); err != nil {
-		// If we can't parse the version, return a default increment
-		return "1.0.0"
-	}
-
-	// If patch is 9, increment minor and reset patch
-	if patch == 9 {
-		patch = 0
-		// If minor is 9, increment major and reset minor
-		if minor == 9 {
-			major++
-			minor = 0
-		} else {
-			minor++
-		}
-	} else {
-		patch++
-	}
-
-	return fmt.Sprintf("%d.%d.%d", major, minor, patch)
+	return templates, nil
 }

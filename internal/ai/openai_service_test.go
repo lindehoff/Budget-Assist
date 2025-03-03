@@ -1,522 +1,778 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	db "github.com/lindehoff/Budget-Assist/internal/db"
+	"github.com/lindehoff/Budget-Assist/internal/db"
 	"github.com/shopspring/decimal"
 )
 
-func setupMockServer(t *testing.T, response OpenAIResponse, statusCode int) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer test-api-key" {
-			t.Errorf("Authorization header = %q, want Bearer test-api-key", got)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statusCode)
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Fatal(err)
-		}
-	}))
+type mockRoundTripper struct {
+	response *http.Response
+	err      error
 }
 
-func setupTestService(t *testing.T, server *httptest.Server) *OpenAIService {
-	store := NewMockStore()
-
-	// Create prompt templates
-	prompts := []struct {
-		promptType PromptType
-		version    string
-	}{
-		{TransactionAnalysisPrompt, "1.0.0"},
-		{DocumentExtractionPrompt, "1.0.0"},
-		{TransactionCategorizationPrompt, "1.0.0"},
+func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if m.err != nil {
+		return nil, m.err
 	}
-
-	for _, p := range prompts {
-		prompt := &db.Prompt{
-			Type:         string(p.promptType),
-			Version:      p.version,
-			SystemPrompt: "You are a helpful assistant.",
-			UserPrompt:   "Please help me with this task.",
-			IsActive:     true,
-		}
-		if err := store.CreatePrompt(context.Background(), prompt); err != nil {
-			t.Fatalf("failed to create prompt template: %v", err)
-		}
-	}
-
-	logger := slog.Default()
-	config := Config{
-		BaseURL:        server.URL,
-		APIKey:         "test-api-key",
-		RequestTimeout: 5,
-	}
-	return NewOpenAIService(config, store, logger)
+	return m.response, nil
 }
 
-func TestOpenAIService_AnalyzeTransaction(t *testing.T) {
-	ctx := context.TODO()
+func setupMockClient(statusCode int, body interface{}) *http.Client {
+	var responseBody []byte
 
-	type testCase struct {
-		name        string
-		transaction *db.Transaction
-		options     AnalysisOptions
-		response    OpenAIResponse
-		wantScore   float64
-		wantRemarks string
+	// Marshal the body directly, regardless of type
+	responseBody, _ = json.Marshal(body)
+
+	response := &http.Response{
+		StatusCode: statusCode,
+		Body:       io.NopCloser(bytes.NewReader(responseBody)),
 	}
-
-	tests := []testCase{
-		{
-			name: "Successfully_analyze_food_category",
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: `{"remarks":"Food purchase","score":0.9}`,
-						},
-					},
-				},
-			},
-			transaction: &db.Transaction{
-				Amount:          decimal.RequireFromString("100.50"),
-				TransactionDate: time.Date(2024, 2, 24, 12, 0, 0, 0, time.UTC),
-				Description:     "COOP Grocery Store",
-				Currency:        db.CurrencySEK,
-			},
-			options: AnalysisOptions{
-				DocumentType:     "receipt",
-				TransactionHints: "Regular grocery shopping",
-				CategoryHints:    "Food and household items",
-			},
-			wantScore:   0.9,
-			wantRemarks: "Food purchase",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, http.StatusOK)
-			t.Cleanup(func() {
-				server.Close()
-			})
-
-			service := setupTestService(t, server)
-
-			got, err := service.AnalyzeTransaction(ctx, tt.transaction, tt.options)
-			if err != nil {
-				t.Fatalf("AnalyzeTransaction() error = %v", err)
-				return
-			}
-
-			if got.Score != tt.wantScore {
-				t.Errorf("Score = %v, want %v", got.Score, tt.wantScore)
-				return
-			}
-			if got.Remarks != tt.wantRemarks {
-				t.Errorf("Remarks = %v, want %v", got.Remarks, tt.wantRemarks)
-				return
-			}
-		})
+	return &http.Client{
+		Transport: &mockRoundTripper{response: response},
 	}
 }
 
-func TestOpenAIService_ExtractDocument(t *testing.T) {
-	ctx := context.TODO()
-
-	type testCase struct {
-		name        string
-		document    *Document
-		response    OpenAIResponse
-		wantContent string
-	}
-
-	tests := []testCase{
-		{
-			name: "Successfully_extract_pdf_content",
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: `{"content":"Sample document content"}`,
-						},
-					},
-				},
-			},
-			document: &Document{
-				Content: []byte("Sample PDF content"),
-			},
-			wantContent: "Sample document content",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, http.StatusOK)
-			t.Cleanup(func() {
-				server.Close()
-			})
-
-			service := setupTestService(t, server)
-
-			got, err := service.ExtractDocument(ctx, tt.document)
-			if err != nil {
-				t.Fatalf("ExtractDocument(%q) error = %v", string(tt.document.Content), err)
-				return
-			}
-
-			if got.Content != tt.wantContent {
-				t.Errorf("ExtractDocument(%q) content:\ngot:  %q\nwant: %q",
-					string(tt.document.Content), got.Content, tt.wantContent)
-				return
-			}
-		})
-	}
-}
-
-func TestOpenAIService_SuggestCategories(t *testing.T) {
-	type testCase struct {
-		name        string
-		response    OpenAIResponse
-		want        []CategoryMatch
-		description string
-	}
-
-	tests := []testCase{
-		{
-			name: "Successfully_suggest_multiple_categories",
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: `[{"category":"Food","confidence":0.9},{"category":"Groceries","confidence":0.8}]`,
-						},
-					},
-				},
-			},
-			want: []CategoryMatch{
-				{Category: "Food", Confidence: 0.9},
-				{Category: "Groceries", Confidence: 0.8},
-			},
-			description: "Grocery shopping at ICA",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, http.StatusOK)
-			defer server.Close()
-
-			service := setupTestService(t, server)
-
-			got, err := service.SuggestCategories(context.TODO(), tt.description)
-			if err != nil {
-				t.Fatalf("SuggestCategories() unexpected error: %v", err)
-			}
-
-			if len(got) != len(tt.want) {
-				t.Fatalf("SuggestCategories() returned %d suggestions, want %d", len(got), len(tt.want))
-			}
-
-			for i, want := range tt.want {
-				if got[i].Category != want.Category {
-					t.Errorf("SuggestCategories() category[%d] = %v, want %v", i, got[i].Category, want.Category)
-				}
-				if got[i].Confidence != want.Confidence {
-					t.Errorf("SuggestCategories() confidence[%d] = %v, want %v", i, got[i].Confidence, want.Confidence)
-				}
-			}
-		})
-	}
-}
-
-func TestOpenAIService_Error_invalid_response(t *testing.T) {
-	type testCase struct {
-		name       string
-		response   OpenAIResponse
-		statusCode int
-		wantErrMsg string
-	}
-
-	tests := []testCase{
-		{
-			name: "Error_invalid_json_content",
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: `invalid json`,
-						},
-					},
-				},
-			},
-			statusCode: http.StatusOK,
-			wantErrMsg: "failed to decode response content",
-		},
-		{
-			name: "Error_empty_content",
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: "",
-						},
-					},
-				},
-			},
-			statusCode: http.StatusOK,
-			wantErrMsg: "empty content in OpenAI response",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := setupMockServer(t, tt.response, tt.statusCode)
-			defer server.Close()
-
-			service := setupTestService(t, server)
-
-			opts := AnalysisOptions{
-				DocumentType: "receipt",
-			}
-
-			_, err := service.AnalyzeTransaction(context.TODO(), &db.Transaction{
-				Description: "Test transaction",
-				Amount:      decimal.RequireFromString("100.00"),
-				Currency:    "SEK",
-			}, opts)
-
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-
-			if !strings.Contains(err.Error(), tt.wantErrMsg) {
-				t.Errorf("error = %v, want %v", err, tt.wantErrMsg)
-			}
-		})
-	}
-}
-
-func TestOpenAIService_Error_rate_limit_with_retry(t *testing.T) {
-	type response struct {
-		statusCode int
-		response   interface{}
-	}
-
-	responses := []response{
-		{
-			statusCode: http.StatusTooManyRequests,
-			response:   nil,
-		},
-		{
-			statusCode: http.StatusOK,
-			response: OpenAIResponse{
-				Choices: []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				}{
-					{
-						Message: struct {
-							Content string `json:"content"`
-						}{
-							Content: `{"score":0.8,"remarks":"This appears to be a food-related expense."}`,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-key" {
-			t.Error("expected Authorization header with Bearer test-key")
-		}
-
-		response := responses[0]
-		responses = responses[1:]
-
-		w.WriteHeader(response.statusCode)
-		if response.response != nil {
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(response.response); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}))
-	defer server.Close()
-
-	service := setupTestService(t, server)
-	service.config.APIKey = "test-key"
-
-	opts := AnalysisOptions{
-		DocumentType: "receipt",
-	}
-
-	_, err := service.AnalyzeTransaction(context.TODO(), &db.Transaction{
-		Description: "Test transaction",
-		Amount:      decimal.RequireFromString("100.00"),
-		Currency:    "SEK",
-	}, opts)
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	var opErr *OperationError
-	if !errors.As(err, &opErr) {
-		t.Errorf("error = %v, want OperationError", err)
-		return
-	}
-
-	var rateLimitErr *RateLimitError
-	if !errors.As(opErr.Err, &rateLimitErr) {
-		t.Errorf("inner error = %v, want RateLimitError", opErr.Err)
-		return
-	}
-
-	if rateLimitErr.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("status code = %d, want %d", rateLimitErr.StatusCode, http.StatusTooManyRequests)
-	}
-}
-
-func TestOpenAIService_Error_empty_document(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("server should not be called for empty document")
-	}))
-	defer server.Close()
-
-	service := setupTestService(t, server)
-
-	doc := &Document{
-		Content: []byte{},
-	}
-
-	_, err := service.ExtractDocument(context.TODO(), doc)
-	if err == nil {
-		t.Fatal("expected error for empty document, got nil")
-		return
-	}
-
-	wantErr := "empty document content"
-	if !strings.Contains(err.Error(), wantErr) {
-		t.Errorf("error = %v, want to contain %v", err, wantErr)
-		return
-	}
-}
-
-func TestOpenAIService_Context_timeout(t *testing.T) {
-	type testCase struct {
+func Test_OpenAIService_AnalyzeTransaction(t *testing.T) {
+	tests := []struct {
 		name           string
-		contextTimeout time.Duration
-		serverDelay    time.Duration
-		wantErr        bool
-		wantErrType    error
-	}
-
-	tests := []testCase{
+		transaction    *db.Transaction
+		opts           AnalysisOptions
+		mockResponse   interface{}
+		expectedResult *Analysis
+		expectedError  error
+	}{
 		{
-			name:           "Error_context_timeout_exceeded",
-			contextTimeout: 50 * time.Millisecond,
-			serverDelay:    100 * time.Millisecond,
-			wantErr:        true,
-			wantErrType:    context.DeadlineExceeded,
+			name: "Successfully_analyze_transaction",
+			transaction: &db.Transaction{
+				Description:     "Grocery shopping at Walmart",
+				Amount:          decimal.NewFromFloat(100.50),
+				Currency:        "USD",
+				TransactionDate: time.Now(),
+			},
+			opts: AnalysisOptions{
+				DocumentType: "bill",
+			},
+			mockResponse: &ChatCompletionResponse{
+				Choices: []Choice{
+					{
+						Message: Message{
+							Content: `{"category": "Groceries", "subcategory": "Supermarket", "confidence": 0.95}`,
+						},
+					},
+				},
+			},
+			expectedResult: &Analysis{
+				Category:    "Groceries",
+				Subcategory: "Supermarket",
+				Confidence:  0.95,
+			},
+			expectedError: nil,
 		},
 		{
-			name:           "Successfully_complete_before_timeout",
-			contextTimeout: 100 * time.Millisecond,
-			serverDelay:    50 * time.Millisecond,
-			wantErr:        false,
+			name: "Analyze_error_unsupported_document_type",
+			transaction: &db.Transaction{
+				Description:     "Test transaction",
+				Amount:          decimal.NewFromFloat(100.50),
+				Currency:        "USD",
+				TransactionDate: time.Now(),
+			},
+			opts: AnalysisOptions{
+				DocumentType: "unsupported",
+			},
+			expectedError: fmt.Errorf("AnalyzeTransaction operation failed: unsupported document type: unsupported"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				time.Sleep(tt.serverDelay)
-				response := OpenAIResponse{
-					Choices: []struct {
-						Message struct {
-							Content string `json:"content"`
-						} `json:"message"`
-					}{
-						{
-							Message: struct {
-								Content string `json:"content"`
-							}{
-								Content: `{"score":0.8,"remarks":"This appears to be a food-related expense."}`,
-							},
+			// Create a mock store
+			store := db.NewMockStore()
+
+			// Create a test prompt
+			prompt := &db.Prompt{
+				Type:         db.BillAnalysisPrompt,
+				Name:         "Test Prompt",
+				SystemPrompt: "System prompt",
+				UserPrompt:   "User prompt for {{.Description}}",
+				Version:      "1.0",
+				IsActive:     true,
+			}
+			if err := store.CreatePrompt(context.Background(), prompt); err != nil {
+				t.Fatalf("failed to create test prompt: %v", err)
+			}
+
+			// Create the service with mocked HTTP client
+			client := setupMockClient(http.StatusOK, tt.mockResponse)
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, store, slog.Default())
+			service.client = client
+
+			// Call the method
+			analysis, err := service.AnalyzeTransaction(context.Background(), tt.transaction, tt.opts)
+
+			if tt.expectedError != nil {
+				if err == nil {
+					t.Errorf("OpenAIService.AnalyzeTransaction() error = nil, want error")
+					return
+				}
+				if err.Error() != tt.expectedError.Error() {
+					t.Errorf("OpenAIService.AnalyzeTransaction() error = %v, want %v", err, tt.expectedError)
+					return
+				}
+			} else {
+				if err != nil {
+					t.Errorf("OpenAIService.AnalyzeTransaction() error = %v, want nil", err)
+					return
+				}
+				if analysis == nil {
+					t.Errorf("OpenAIService.AnalyzeTransaction() analysis = nil, want non-nil")
+					return
+				}
+				if analysis.Category != tt.expectedResult.Category {
+					t.Errorf("OpenAIService.AnalyzeTransaction() analysis.Category = %v, want %v",
+						analysis.Category, tt.expectedResult.Category)
+				}
+				if analysis.Subcategory != tt.expectedResult.Subcategory {
+					t.Errorf("OpenAIService.AnalyzeTransaction() analysis.Subcategory = %v, want %v",
+						analysis.Subcategory, tt.expectedResult.Subcategory)
+				}
+				if analysis.Confidence != tt.expectedResult.Confidence {
+					t.Errorf("OpenAIService.AnalyzeTransaction() analysis.Confidence = %v, want %v",
+						analysis.Confidence, tt.expectedResult.Confidence)
+				}
+			}
+		})
+	}
+}
+
+func Test_OpenAIService_ExtractDocument(t *testing.T) {
+	tests := []struct {
+		name           string
+		document       *Document
+		mockResponse   interface{}
+		expectedResult *Extraction
+		expectedError  error
+	}{
+		{
+			name: "Successfully_extract_document",
+			document: &Document{
+				Content: []byte("Receipt from Walmart\nDate: 2024-03-20\nAmount: $50.25\nGroceries"),
+				Type:    "receipt",
+			},
+			mockResponse: &ChatCompletionResponse{
+				Choices: []Choice{
+					{
+						Message: Message{
+							Content: `{
+								"date": "2024-03-20",
+								"amount": 50.25,
+								"currency": "USD",
+								"description": "Receipt from Walmart",
+								"category": "Groceries",
+								"subcategory": "Supermarket"
+							}`,
 						},
 					},
-				}
-				if err := json.NewEncoder(w).Encode(response); err != nil {
-					t.Fatal(err)
-				}
-			}))
-			defer server.Close()
+				},
+			},
+			expectedResult: &Extraction{
+				Date:        "2024-03-20",
+				Amount:      50.25,
+				Currency:    "USD",
+				Description: "Receipt from Walmart",
+				Category:    "Groceries",
+				Subcategory: "Supermarket",
+			},
+			expectedError: nil,
+		},
+		{
+			name: "Extract_error_empty_document",
+			document: &Document{
+				Content: []byte{},
+				Type:    "receipt",
+			},
+			expectedError: fmt.Errorf("ExtractDocument operation failed: empty document content"),
+		},
+	}
 
-			service := setupTestService(t, server)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock store
+			store := db.NewMockStore()
 
-			ctx, cancel := context.WithTimeout(context.Background(), tt.contextTimeout)
-			defer cancel()
+			// Create a test prompt
+			prompt := &db.Prompt{
+				Type:         db.BillAnalysisPrompt,
+				Name:         "Test Prompt",
+				SystemPrompt: "System prompt",
+				UserPrompt:   "User prompt for {{.Content}}",
+				Version:      "1.0",
+				IsActive:     true,
+			}
+			if err := store.CreatePrompt(context.Background(), prompt); err != nil {
+				t.Fatalf("failed to create test prompt: %v", err)
+			}
 
-			_, err := service.AnalyzeTransaction(ctx, &db.Transaction{
-				Description: "Test transaction",
-				Amount:      decimal.RequireFromString("100.00"),
-				Currency:    "SEK",
-			}, AnalysisOptions{
-				DocumentType: "receipt",
-			})
+			// Create the service with mocked HTTP client
+			client := setupMockClient(http.StatusOK, tt.mockResponse)
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, store, slog.Default())
+			service.client = client
 
-			if tt.wantErr {
+			// Call the method
+			extraction, err := service.ExtractDocument(context.Background(), tt.document)
+
+			if tt.expectedError != nil {
 				if err == nil {
-					t.Fatal("expected error, got nil")
+					t.Errorf("OpenAIService.ExtractDocument() error = nil, want error")
+					return
 				}
-				if !errors.Is(err, tt.wantErrType) {
-					t.Errorf("error = %v, want %v", err, tt.wantErrType)
+				if err.Error() != tt.expectedError.Error() {
+					t.Errorf("OpenAIService.ExtractDocument() error = %v, want %v", err, tt.expectedError)
+					return
 				}
-			} else if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			} else {
+				if err != nil {
+					t.Errorf("OpenAIService.ExtractDocument() error = %v, want nil", err)
+					return
+				}
+				if extraction == nil {
+					t.Errorf("OpenAIService.ExtractDocument() extraction = nil, want non-nil")
+					return
+				}
+				if extraction.Date != tt.expectedResult.Date {
+					t.Errorf("OpenAIService.ExtractDocument() extraction.Date = %v, want %v",
+						extraction.Date, tt.expectedResult.Date)
+				}
+				if extraction.Amount != tt.expectedResult.Amount {
+					t.Errorf("OpenAIService.ExtractDocument() extraction.Amount = %v, want %v",
+						extraction.Amount, tt.expectedResult.Amount)
+				}
+				if extraction.Currency != tt.expectedResult.Currency {
+					t.Errorf("OpenAIService.ExtractDocument() extraction.Currency = %v, want %v",
+						extraction.Currency, tt.expectedResult.Currency)
+				}
+				if extraction.Description != tt.expectedResult.Description {
+					t.Errorf("OpenAIService.ExtractDocument() extraction.Description = %v, want %v",
+						extraction.Description, tt.expectedResult.Description)
+				}
+				if extraction.Category != tt.expectedResult.Category {
+					t.Errorf("OpenAIService.ExtractDocument() extraction.Category = %v, want %v",
+						extraction.Category, tt.expectedResult.Category)
+				}
+				if extraction.Subcategory != tt.expectedResult.Subcategory {
+					t.Errorf("OpenAIService.ExtractDocument() extraction.Subcategory = %v, want %v",
+						extraction.Subcategory, tt.expectedResult.Subcategory)
+				}
+			}
+		})
+	}
+}
+
+func Test_OpenAIService_SuggestCategories(t *testing.T) {
+	tests := []struct {
+		name           string
+		description    string
+		mockResponse   interface{}
+		expectedResult []CategoryMatch
+		expectedError  error
+	}{
+		{
+			name:        "Successfully_suggest_categories",
+			description: "Netflix subscription",
+			mockResponse: &ChatCompletionResponse{
+				Choices: []Choice{
+					{
+						Message: Message{
+							Content: `[{"category": "Entertainment", "confidence": 0.98}]`,
+						},
+					},
+				},
+			},
+			expectedResult: []CategoryMatch{
+				{
+					Category:   "Entertainment",
+					Confidence: 0.98,
+				},
+			},
+			expectedError: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock store
+			store := db.NewMockStore()
+
+			// Create a test prompt
+			prompt := &db.Prompt{
+				Type:         db.TransactionCategorizationPrompt,
+				Name:         "Test Prompt",
+				SystemPrompt: "System prompt",
+				UserPrompt:   "User prompt for {{.Description}}",
+				Version:      "1.0",
+				IsActive:     true,
+			}
+			if err := store.CreatePrompt(context.Background(), prompt); err != nil {
+				t.Fatalf("failed to create test prompt: %v", err)
+			}
+
+			// Create the service with mocked HTTP client
+			client := setupMockClient(http.StatusOK, tt.mockResponse)
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, store, slog.Default())
+			service.client = client
+
+			// Call the method
+			matches, err := service.SuggestCategories(context.Background(), tt.description)
+
+			if tt.expectedError != nil {
+				if err == nil {
+					t.Errorf("OpenAIService.SuggestCategories() error = nil, want error")
+					return
+				}
+				if err.Error() != tt.expectedError.Error() {
+					t.Errorf("OpenAIService.SuggestCategories() error = %v, want %v", err, tt.expectedError)
+					return
+				}
+			} else {
+				if err != nil {
+					t.Errorf("OpenAIService.SuggestCategories() error = %v, want nil", err)
+					return
+				}
+				if len(matches) != len(tt.expectedResult) {
+					t.Errorf("OpenAIService.SuggestCategories() matches length = %d, want %d",
+						len(matches), len(tt.expectedResult))
+					return
+				}
+				for i, match := range matches {
+					if match.Category != tt.expectedResult[i].Category {
+						t.Errorf("OpenAIService.SuggestCategories() matches[%d].Category = %v, want %v",
+							i, match.Category, tt.expectedResult[i].Category)
+					}
+					if match.Confidence != tt.expectedResult[i].Confidence {
+						t.Errorf("OpenAIService.SuggestCategories() matches[%d].Confidence = %v, want %v",
+							i, match.Confidence, tt.expectedResult[i].Confidence)
+					}
+				}
+			}
+		})
+	}
+}
+
+func Test_OpenAIService_handleErrorResponse(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       []byte
+		wantErr    error
+	}{
+		{
+			name:       "HandleErrorResponse_error_rate_limit",
+			statusCode: http.StatusTooManyRequests,
+			body:       []byte("rate limit exceeded"),
+			wantErr:    &RateLimitError{Message: "rate limit exceeded", StatusCode: http.StatusTooManyRequests},
+		},
+		{
+			name:       "HandleErrorResponse_error_api_error",
+			statusCode: http.StatusBadRequest,
+			body:       []byte("invalid request"),
+			wantErr:    &OpenAIError{Operation: "API request", Message: "invalid request", StatusCode: http.StatusBadRequest},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create the service
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, nil, slog.Default())
+
+			// Create a mock response
+			resp := &http.Response{
+				StatusCode: tt.statusCode,
+				Body:       io.NopCloser(bytes.NewReader(tt.body)),
+			}
+
+			// Call the method
+			err := service.handleErrorResponse(resp, tt.body)
+			if err == nil {
+				t.Errorf("OpenAIService.handleErrorResponse() error = nil, want error")
+				return
+			}
+
+			// Check the error type
+			switch tt.statusCode {
+			case http.StatusTooManyRequests:
+				rateLimitErr, ok := err.(*RateLimitError)
+				if !ok {
+					t.Errorf("OpenAIService.handleErrorResponse() error type = %T, want *RateLimitError", err)
+					return
+				}
+				if rateLimitErr.StatusCode != tt.statusCode {
+					t.Errorf("RateLimitError.StatusCode = %v, want %v", rateLimitErr.StatusCode, tt.statusCode)
+				}
+				if rateLimitErr.Message != string(tt.body) {
+					t.Errorf("RateLimitError.Message = %v, want %v", rateLimitErr.Message, string(tt.body))
+				}
+			default:
+				apiErr, ok := err.(*OpenAIError)
+				if !ok {
+					t.Errorf("OpenAIService.handleErrorResponse() error type = %T, want *OpenAIError", err)
+					return
+				}
+				if apiErr.StatusCode != tt.statusCode {
+					t.Errorf("OpenAIError.StatusCode = %v, want %v", apiErr.StatusCode, tt.statusCode)
+				}
+				if apiErr.Message != string(tt.body) {
+					t.Errorf("OpenAIError.Message = %v, want %v", apiErr.Message, string(tt.body))
+				}
+				if apiErr.Operation != "API request" {
+					t.Errorf("OpenAIError.Operation = %v, want %v", apiErr.Operation, "API request")
+				}
+			}
+		})
+	}
+}
+
+func Test_OpenAIService_parseResponse(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        []byte
+		result      interface{}
+		expectError bool
+		errorType   error
+	}{
+		{
+			name: "Successfully_parse_response",
+			body: []byte(`{
+				"choices": [
+					{
+						"message": {
+							"content": "{\"category\": \"Groceries\", \"subcategory\": \"Supermarket\"}"
+						}
+					}
+				]
+			}`),
+			result: &struct {
+				Category    string `json:"category"`
+				Subcategory string `json:"subcategory"`
+			}{},
+			expectError: false,
+		},
+		{
+			name:        "ParseResponse_error_invalid_json",
+			body:        []byte(`{invalid json}`),
+			result:      &struct{}{},
+			expectError: true,
+		},
+		{
+			name:        "ParseResponse_error_no_choices",
+			body:        []byte(`{"choices": []}`),
+			result:      &struct{}{},
+			expectError: true,
+			errorType:   ErrNoChoices,
+		},
+		{
+			name: "ParseResponse_error_empty_content",
+			body: []byte(`{
+				"choices": [
+					{
+						"message": {
+							"content": ""
+						}
+					}
+				]
+			}`),
+			result:      &struct{}{},
+			expectError: true,
+			errorType:   ErrEmptyContent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create the service
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, nil, slog.Default())
+
+			// Call the method
+			err := service.parseResponse(tt.body, tt.result)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("OpenAIService.parseResponse() error = nil, want error")
+					return
+				}
+				if tt.errorType != nil && err != tt.errorType {
+					t.Errorf("OpenAIService.parseResponse() error = %v, want %v", err, tt.errorType)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("OpenAIService.parseResponse() error = %v, want nil", err)
+					return
+				}
+				// For successful case, check the parsed result
+				if result, ok := tt.result.(*struct {
+					Category    string `json:"category"`
+					Subcategory string `json:"subcategory"`
+				}); ok {
+					if result.Category != "Groceries" {
+						t.Errorf("Parsed result.Category = %v, want %v", result.Category, "Groceries")
+					}
+					if result.Subcategory != "Supermarket" {
+						t.Errorf("Parsed result.Subcategory = %v, want %v", result.Subcategory, "Supermarket")
+					}
+				}
+			}
+		})
+	}
+}
+
+func Test_OpenAIService_extractJSONContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected string
+	}{
+		{
+			name:     "Successfully_extract_plain_json",
+			content:  `{"category": "Groceries"}`,
+			expected: `{"category": "Groceries"}`,
+		},
+		{
+			name:     "Successfully_extract_json_from_markdown_code_block",
+			content:  "```json\n{\"category\": \"Groceries\"}\n```",
+			expected: `{"category": "Groceries"}`,
+		},
+		{
+			name:     "Successfully_extract_json_from_simple_code_block",
+			content:  "```\n{\"category\": \"Groceries\"}\n```",
+			expected: `{"category": "Groceries"}`,
+		},
+		{
+			name:     "Successfully_extract_json_from_swedish_text",
+			content:  "Här är kategorin: [{\"category\": \"Groceries\"}]",
+			expected: "[{\"category\": \"Groceries\"}]",
+		},
+		{
+			name:     "Successfully_extract_json_from_swedish_text_with_for",
+			content:  "För denna transaktion: [{\"category\": \"Groceries\"}]",
+			expected: "[{\"category\": \"Groceries\"}]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create the service
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, nil, slog.Default())
+
+			// Call the method
+			result := service.extractJSONContent(tt.content)
+			if result != tt.expected {
+				t.Errorf("OpenAIService.extractJSONContent() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func Test_OpenAIService_processTransactionsResponse(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    string
+		docContent []byte
+		expected   *Extraction
+		expectErr  bool
+	}{
+		{
+			name: "Successfully_process_transactions_with_total",
+			content: `[
+				{"beskrivning": "Item 1", "belopp": 100.50},
+				{"beskrivning": "Item 2", "belopp": 200.75},
+				{"beskrivning": "Total", "belopp": 301.25, "metadata": {"date": "2024-03-20"}}
+			]`,
+			docContent: []byte("Test document content"),
+			expected: &Extraction{
+				Currency:    "SEK",
+				Amount:      301.25,
+				Description: "Item 1 (100.50 SEK), Item 2 (200.75 SEK), Total (301.25 SEK)",
+				Content:     "Test document content",
+			},
+			expectErr: false,
+		},
+		{
+			name: "Successfully_process_transactions_without_total",
+			content: `[
+				{"beskrivning": "Item 1", "belopp": 100.50},
+				{"beskrivning": "Item 2", "belopp": 200.75}
+			]`,
+			docContent: []byte("Test document content"),
+			expected: &Extraction{
+				Currency:    "SEK",
+				Amount:      100.50,
+				Description: "Item 1 (100.50 SEK), Item 2 (200.75 SEK)",
+				Content:     "Test document content",
+			},
+			expectErr: false,
+		},
+		{
+			name:       "Successfully_handle_invalid_json",
+			content:    `{invalid json}`,
+			docContent: []byte("Test document content"),
+			expected: &Extraction{
+				Currency: "SEK",
+				Content:  "Test document content",
+			},
+			expectErr: false,
+		},
+		{
+			name:       "ProcessTransactionsResponse_error_empty_transactions",
+			content:    `[]`,
+			docContent: []byte("Test document content"),
+			expectErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create the service
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, nil, slog.Default())
+
+			// Call the method
+			result, err := service.processTransactionsResponse(tt.content, tt.docContent)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("OpenAIService.processTransactionsResponse() error = nil, want error")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("OpenAIService.processTransactionsResponse() error = %v, want nil", err)
+					return
+				}
+
+				// For successful case, check the extraction
+				if tt.expected != nil {
+					if result.Currency != tt.expected.Currency {
+						t.Errorf("OpenAIService.processTransactionsResponse() result.Currency = %v, want %v",
+							result.Currency, tt.expected.Currency)
+					}
+					if result.Content != tt.expected.Content {
+						t.Errorf("OpenAIService.processTransactionsResponse() result.Content = %v, want %v",
+							result.Content, tt.expected.Content)
+					}
+
+					// For valid transactions, check the description contains all items
+					if !strings.Contains(tt.content, "invalid") && !strings.Contains(tt.content, "[]") {
+						if !strings.Contains(result.Description, "Item 1") {
+							t.Errorf("OpenAIService.processTransactionsResponse() result.Description = %v, should contain 'Item 1'",
+								result.Description)
+						}
+						if !strings.Contains(result.Description, "Item 2") {
+							t.Errorf("OpenAIService.processTransactionsResponse() result.Description = %v, should contain 'Item 2'",
+								result.Description)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func Test_OpenAIService_handleUnmarshalError(t *testing.T) {
+	tests := []struct {
+		name         string
+		content      string
+		result       interface{}
+		unmarshalErr error
+		expectError  bool
+	}{
+		{
+			name:         "Successfully_convert_single_object_to_array",
+			content:      `{"category": "Groceries", "confidence": 0.95}`,
+			result:       &[]map[string]interface{}{},
+			unmarshalErr: fmt.Errorf("json: cannot unmarshal object into Go value of type []map[string]interface {}"),
+			expectError:  false,
+		},
+		{
+			name:         "HandleUnmarshalError_error_non_convertible_result",
+			content:      `{"category": "Groceries", "confidence": 0.95}`,
+			result:       &struct{}{},
+			unmarshalErr: fmt.Errorf("json: cannot unmarshal object into Go value of type struct {}"),
+			expectError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create the service
+			service := NewOpenAIService(Config{
+				BaseURL:        "https://api.openai.com",
+				APIKey:         "test-key",
+				RequestTimeout: 30 * time.Second,
+			}, nil, slog.Default())
+
+			// Call the method
+			err := service.handleUnmarshalError(tt.content, tt.result, tt.unmarshalErr)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("OpenAIService.handleUnmarshalError() error = nil, want error")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("OpenAIService.handleUnmarshalError() error = %v, want nil", err)
+					return
+				}
+
+				// For successful case with array conversion
+				if resultArr, ok := tt.result.(*[]map[string]interface{}); ok {
+					if len(*resultArr) != 1 {
+						t.Errorf("OpenAIService.handleUnmarshalError() resultArr length = %d, want 1", len(*resultArr))
+						return
+					}
+					if (*resultArr)[0]["category"] != "Groceries" {
+						t.Errorf("OpenAIService.handleUnmarshalError() resultArr[0][\"category\"] = %v, want %v",
+							(*resultArr)[0]["category"], "Groceries")
+					}
+					if (*resultArr)[0]["confidence"] != 0.95 {
+						t.Errorf("OpenAIService.handleUnmarshalError() resultArr[0][\"confidence\"] = %v, want %v",
+							(*resultArr)[0]["confidence"], 0.95)
+					}
+				}
 			}
 		})
 	}

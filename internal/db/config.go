@@ -60,8 +60,7 @@ func Initialize(cfg *Config, logger *slog.Logger) (*gorm.DB, error) {
 
 	// Import default categories if requested
 	if cfg.ImportDefaultCategories {
-		importer := &categoryImporter{db: db}
-		if err := ImportDefaultCategories(ctx, db, importer); err != nil {
+		if err := ImportDefaultCategories(ctx, db); err != nil {
 			return nil, fmt.Errorf("failed to import default categories: %w", err)
 		}
 	}
@@ -88,87 +87,4 @@ func Close(db *gorm.DB) error {
 		}
 	}
 	return nil
-}
-
-// categoryImporter implements the CategoryImporter interface
-type categoryImporter struct {
-	db *gorm.DB
-}
-
-func (i *categoryImporter) CreateCategory(ctx context.Context, name, description string, typeID uint, translations map[string]TranslationData, subcategoryIDs []uint) (*Category, error) {
-	category := &Category{
-		Name:        name,
-		Description: description,
-		TypeID:      typeID,
-		IsActive:    true,
-	}
-
-	if err := i.db.WithContext(ctx).Create(category).Error; err != nil {
-		return nil, fmt.Errorf("failed to create category: %w", err)
-	}
-
-	// Create translations
-	for lang, trans := range translations {
-		translation := &Translation{
-			EntityID:     category.ID,
-			EntityType:   string(EntityTypeCategory),
-			LanguageCode: lang,
-			Name:         trans.Name,
-			Description:  trans.Description,
-		}
-		if err := i.db.WithContext(ctx).Create(translation).Error; err != nil {
-			return nil, fmt.Errorf("failed to create translation: %w", err)
-		}
-	}
-
-	// Link subcategories
-	for _, subcatID := range subcategoryIDs {
-		link := &CategorySubcategory{
-			CategoryID:    category.ID,
-			SubcategoryID: subcatID,
-			IsActive:      true,
-		}
-		if err := i.db.WithContext(ctx).Create(link).Error; err != nil {
-			return nil, fmt.Errorf("failed to link subcategory: %w", err)
-		}
-	}
-
-	return category, nil
-}
-
-func (i *categoryImporter) CreateSubcategory(ctx context.Context, name, description string, isSystem bool, translations map[string]TranslationData) (*Subcategory, error) {
-	subcategory := &Subcategory{
-		Name:        name,
-		Description: description,
-		IsSystem:    isSystem,
-		IsActive:    true,
-	}
-
-	if err := i.db.WithContext(ctx).Create(subcategory).Error; err != nil {
-		return nil, fmt.Errorf("failed to create subcategory: %w", err)
-	}
-
-	// Create translations
-	for lang, trans := range translations {
-		translation := &Translation{
-			EntityID:     subcategory.ID,
-			EntityType:   string(EntityTypeSubcategory),
-			LanguageCode: lang,
-			Name:         trans.Name,
-			Description:  trans.Description,
-		}
-		if err := i.db.WithContext(ctx).Create(translation).Error; err != nil {
-			return nil, fmt.Errorf("failed to create translation: %w", err)
-		}
-	}
-
-	return subcategory, nil
-}
-
-func (i *categoryImporter) CreateCategoryType(ctx context.Context, categoryType *CategoryType) error {
-	return i.db.WithContext(ctx).Create(categoryType).Error
-}
-
-func (i *categoryImporter) CreateTranslation(ctx context.Context, translation *Translation) error {
-	return i.db.WithContext(ctx).Create(translation).Error
 }

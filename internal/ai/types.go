@@ -4,29 +4,60 @@ import (
 	"context"
 	"time"
 
-	db "github.com/lindehoff/Budget-Assist/internal/db"
+	"github.com/lindehoff/Budget-Assist/internal/db"
 )
+
+// Config represents the configuration for the OpenAI service
+type Config struct {
+	BaseURL        string
+	APIKey         string
+	Model          string
+	RequestTimeout time.Duration
+	MaxRetries     int
+}
+
+// Document represents a document to be analyzed
+type Document struct {
+	Content []byte
+	Type    string
+}
+
+// AnalysisOptions represents options for transaction analysis
+type AnalysisOptions struct {
+	DocumentType    string
+	RuntimeInsights string
+}
+
+// CategoryMatch represents a suggested category with confidence
+type CategoryMatch struct {
+	Category   string                 `json:"category"`
+	Confidence float64                `json:"confidence"`
+	Raw        map[string]interface{} `json:"-"`
+}
 
 // Analysis represents the result of analyzing a transaction
 type Analysis struct {
-	Remarks string  `json:"remarks"`
-	Score   float64 `json:"score"`
+	Category    string  `json:"category"`
+	Subcategory string  `json:"subcategory"`
+	Confidence  float64 `json:"confidence"`
 }
 
-// Document represents a document to be processed
-type Document struct {
-	Content []byte
-}
-
-// Extraction represents extracted information from a document
+// Extraction represents the result of extracting information from a document
 type Extraction struct {
-	Content string `json:"content"`
+	Date        string  `json:"date"`
+	Amount      float64 `json:"amount"`
+	Currency    string  `json:"currency"`
+	Description string  `json:"description"`
+	Category    string  `json:"category"`
+	Subcategory string  `json:"subcategory"`
+	Content     string  `json:"content"`
 }
 
-// CategoryMatch represents a category suggestion with confidence score
-type CategoryMatch struct {
-	Category   string  `json:"category"`
-	Confidence float64 `json:"confidence"`
+// Service defines the interface for AI services
+type Service interface {
+	AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts AnalysisOptions) (*Analysis, error)
+	ExtractDocument(ctx context.Context, doc *Document) (*Extraction, error)
+	SuggestCategories(ctx context.Context, description string) ([]CategoryMatch, error)
 }
 
 // ModelExample represents a training example for the AI model
@@ -36,36 +67,17 @@ type ModelExample struct {
 	Score  float64 `json:"score,omitempty"`
 }
 
-// AnalysisOptions contains runtime options for transaction analysis
-type AnalysisOptions struct {
-	// DocumentType specifies the type of document being processed
-	DocumentType string
-	// TransactionHints provides additional context about the transactions
-	TransactionHints string
-	// CategoryHints provides hints for transaction categorization
-	CategoryHints string
+// ChatCompletionResponse represents the response from OpenAI's chat completion API
+type ChatCompletionResponse struct {
+	Choices []Choice `json:"choices"`
 }
 
-// Service defines the interface for AI operations
-type Service interface {
-	AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts AnalysisOptions) (*Analysis, error)
-	ExtractDocument(ctx context.Context, doc *Document) (*Extraction, error)
-	SuggestCategories(ctx context.Context, desc string) ([]CategoryMatch, error)
+// Choice represents a choice in the OpenAI API response
+type Choice struct {
+	Message Message `json:"message"`
 }
 
-// Config holds configuration for the AI service
-type Config struct {
-	BaseURL        string
-	APIKey         string
-	RequestTimeout time.Duration
-	MaxRetries     int
-}
-
-// OpenAIResponse represents the raw response from OpenAI API
-type OpenAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
+// Message represents a message in the OpenAI API response
+type Message struct {
+	Content string `json:"content"`
 }

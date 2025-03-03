@@ -2,73 +2,37 @@
   "prompts": [
     {
       "type": "bill_analysis",
-      "name": "Bill Analysis",
-      "translations": {
-        "en": {
-          "name": "Bill Analysis",
-          "system_prompt": "You are a helpful assistant that analyzes bills and extracts transactions.",
-          "user_prompt": "Analyze this bill and extract all transactions.\nFor each transaction identify:\n1. Date (in YYYY-MM-DD format)\n2. Amount\n3. Description\n4. Any additional metadata (reference numbers, invoice numbers, etc)\n\nAdditional context from user for this specific document:\n{{.RuntimeInsights}}\n\nThe bill text is:\n{{.Content}}\n\nRespond with a JSON array of transactions."
-        },
-        "sv": {
-          "name": "Fakturaanalys",
-          "system_prompt": "Du är en hjälpsam assistent som analyserar fakturor och extraherar transaktioner.",
-          "user_prompt": "Analysera denna faktura och extrahera alla transaktioner.\nFör varje transaktion identifiera:\n1. Datum (i ÅÅÅÅ-MM-DD format)\n2. Belopp\n3. Beskrivning\n4. Eventuell ytterligare metadata (referensnummer, fakturanummer, etc)\n\nYtterligare kontext från användaren för detta specifika dokument:\n{{.RuntimeInsights}}\n\nFakturatexten är:\n{{.Content}}\n\nSvara med en JSON-array av transaktioner."
-        }
-      },
+      "name": "Fakturaanalys",
+      "description": "Analyserar fakturor för att extrahera transaktioner",
+      "system_prompt": "Du är en hjälpsam assistent som analyserar fakturor för att extrahera transaktioner.",
+      "user_prompt": "Analysera denna faktura och extrahera alla transaktioner.\nFör varje transaktion identifiera:\n1. Datum (i ÅÅÅÅ-MM-DD format)\n2. Belopp\n3. Beskrivning\n4. Eventuell ytterligare metadata (referensnummer, fakturanummer, etc)\n\nYtterligare kontext från användaren för detta specifika dokument:\n{{.RuntimeInsights}}\n\nFakturatexten är:\n{{.Content}}\n\nSvara med en JSON-array av transaktioner.",
       "version": "1.0.0",
       "is_active": true
     },
     {
       "type": "receipt_analysis",
-      "name": "Receipt Analysis",
-      "translations": {
-        "en": {
-          "name": "Receipt Analysis",
-          "system_prompt": "You are a helpful assistant that analyzes receipts and extracts transactions.",
-          "user_prompt": "Analyze this receipt and extract all transactions.\nFor each transaction identify:\n1. Date (in YYYY-MM-DD format)\n2. Amount\n3. Description/Item\n4. Quantity (if applicable)\n5. Unit price (if applicable)\n\nAdditional context from user for this specific document:\n{{.RuntimeInsights}}\n\nThe receipt text is:\n{{.Content}}\n\nRespond with a JSON array of transactions."
-        },
-        "sv": {
-          "name": "Kvittoanalys",
-          "system_prompt": "Du är en hjälpsam assistent som analyserar kvitton och extraherar transaktioner.",
-          "user_prompt": "Analysera detta kvitto och extrahera alla transaktioner.\nFör varje transaktion identifiera:\n1. Datum (i ÅÅÅÅ-MM-DD format)\n2. Belopp\n3. Beskrivning/Vara\n4. Antal (om tillämpligt)\n5. Styckpris (om tillämpligt)\n\nYtterligare kontext från användaren för detta specifika dokument:\n{{.RuntimeInsights}}\n\nKvittotexten är:\n{{.Content}}\n\nSvara med en JSON-array av transaktioner."
-        }
-      },
+      "name": "Kvittoanalys",
+      "description": "Analyserar kvitton för att extrahera transaktioner",
+      "system_prompt": "Du är en hjälpsam assistent som analyserar kvitton för att extrahera transaktioner.",
+      "user_prompt": "Analysera detta kvitto och extrahera alla transaktioner.\nFör varje transaktion identifiera:\n1. Datum (i ÅÅÅÅ-MM-DD format)\n2. Belopp\n3. Beskrivning/Vara\n4. Antal (om tillämpligt)\n5. Styckpris (om tillämpligt)\n\nYtterligare kontext från användaren för detta specifika dokument:\n{{.RuntimeInsights}}\n\nKvittotexten är:\n{{.Content}}\n\nSvara med en JSON-array av transaktioner.",
       "version": "1.0.0",
       "is_active": true
     },
     {
       "type": "bank_statement_analysis",
-      "name": "Bank Statement Analysis",
-      "translations": {
-        "en": {
-          "name": "Bank Statement Analysis",
-          "system_prompt": "You are a helpful assistant that analyzes bank statements and extracts transactions.",
-          "user_prompt": "Analyze this bank statement and extract all transactions.\nFor each transaction identify:\n1. Date (in YYYY-MM-DD format)\n2. Amount\n3. Description\n4. Transaction type\n5. Reference numbers\n\nAdditional context from user for this specific document:\n{{.RuntimeInsights}}\n\nThe bank statement text is:\n{{.Content}}\n\nRespond with a JSON array of transactions."
-        },
-        "sv": {
-          "name": "Kontoutdragsanalys",
-          "system_prompt": "Du är en hjälpsam assistent som analyserar kontoutdrag och extraherar transaktioner.",
-          "user_prompt": "Analysera detta kontoutdrag och extrahera alla transaktioner.\nFör varje transaktion identifiera:\n1. Datum (i ÅÅÅÅ-MM-DD format)\n2. Belopp\n3. Beskrivning\n4. Transaktionstyp\n5. Referensnummer\n\nYtterligare kontext från användaren för detta specifika dokument:\n{{.RuntimeInsights}}\n\nKontoutdragstexten är:\n{{.Content}}\n\nSvara med en JSON-array av transaktioner."
-        }
-      },
+      "name": "Kontoutdragsanalys",
+      "description": "Analyserar kontoutdrag för att extrahera transaktioner",
+      "system_prompt": "Du är en hjälpsam assistent som analyserar kontoutdrag för att extrahera transaktioner.",
+      "user_prompt": "Analysera detta kontoutdrag och extrahera alla transaktioner.\nFör varje transaktion identifiera:\n1. Datum (i ÅÅÅÅ-MM-DD format)\n2. Belopp\n3. Beskrivning\n4. Eventuell ytterligare metadata (referensnummer, transaktions-ID, etc)\n\nYtterligare kontext från användaren för detta specifika dokument:\n{{.RuntimeInsights}}\n\nKontoutdragstexten är:\n{{.Content}}\n\nSvara med en JSON-array av transaktioner.",
       "version": "1.0.0",
       "is_active": true
     },
     {
       "type": "transaction_categorization",
-      "name": "Transaction Categorization",
-      "translations": {
-        "en": {
-          "name": "Transaction Categorization",
-          "system_prompt": "You are a helpful assistant that categorizes financial transactions.",
-          "user_prompt": "Categorize this transaction according to our predefined categories:\n\n{{range .Categories}}\n- {{.Path}}: {{.Description}}\n{{end}}\n\nAdditional categorization rules for this specific transaction:\n{{.RuntimeInsights}}\n\nTransaction details:\nDescription: {{.Description}}\nAmount: {{.Amount}}\nDate: {{.Date}}\n\nRespond with a JSON containing:\n1. main_category: The top-level category\n2. sub_category: The specific sub-category\n3. confidence: Your confidence in this categorization (0-1)\n4. reasoning: A brief explanation of why this category was chosen"
-        },
-        "sv": {
-          "name": "Transaktionskategorisering",
-          "system_prompt": "Du är en hjälpsam assistent som kategoriserar finansiella transaktioner.",
-          "user_prompt": "Kategorisera denna transaktion enligt våra fördefinierade kategorier:\n\n{{range .Categories}}\n- {{.Path}}: {{.Description}}\n{{end}}\n\nYtterligare kategoriseringsregler för denna specifika transaktion:\n{{.RuntimeInsights}}\n\nTransaktionsdetaljer:\nBeskrivning: {{.Description}}\nBelopp: {{.Amount}}\nDatum: {{.Date}}\n\nSvara med en JSON som innehåller:\n1. main_category: Huvudkategorin\n2. sub_category: Den specifika underkategorin\n3. confidence: Din säkerhet i denna kategorisering (0-1)\n4. reasoning: En kort förklaring till varför denna kategori valdes"
-        }
-      },
+      "name": "Transaktionskategorisering",
+      "description": "Kategoriserar finansiella transaktioner",
+      "system_prompt": "Du är en hjälpsam assistent som kategoriserar finansiella transaktioner. Du måste använda exakt de fördefinierade kategorierna som tillhandahålls, utan att hitta på egna kategorier.",
+      "user_prompt": "Kategorisera denna transaktion enligt våra fördefinierade kategorier. Du måste använda exakt en av följande kategorisökvägar:\n\n{{range .Categories}}\n- {{.Path}}: {{.Description}}\n{{end}}\n\nYtterligare kategoriseringsregler för denna specifika transaktion:\n{{.RuntimeInsights}}\n\nTransaktionsdetaljer:\nBeskrivning: {{.Description}}\nBelopp: {{.Amount}}\nDatum: {{.Date}}\n\nSvara med ett JSON-objekt som innehåller:\n1. main_category: Exakt sökväg till kategorin (t.ex. 'Fasta kostnader/Medier')\n2. confidence: Din säkerhet i denna kategorisering (0-1)",
       "version": "1.0.0",
       "is_active": true
     }
