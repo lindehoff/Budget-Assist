@@ -83,7 +83,7 @@ budget-assist import scan [flags]
 
 Flags:
   --device int      Camera device number (default 0)
-  --type string     Document type (receipt|invoice|statement)
+  --type string     Document type (receipt|bill|statement)
 ```
 
 ### 4. Transaction Management

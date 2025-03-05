@@ -189,43 +189,108 @@ func setupLogFile() (*os.File, string) {
 	return file, logFilePath
 }
 
-// createColoredTextHandler creates a text handler with colored log levels
-func createColoredTextHandler(output io.Writer, level slog.Level) slog.Handler {
-	return slog.NewTextHandler(output, &slog.HandlerOptions{
-		Level: level,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Format the time for better readability
-			if a.Key == slog.TimeKey {
-				return slog.Attr{
-					Key:   a.Key,
-					Value: slog.StringValue(time.Now().Format("15:04:05")),
-				}
-			}
-			// Add color to log level if terminal supports it
-			if a.Key == slog.LevelKey {
-				level := a.Value.Any().(slog.Level)
-				levelStr := level.String()
+// createStructuredTextHandler creates a more readable text handler for console output
+func createStructuredTextHandler(output io.Writer, level slog.Level) slog.Handler {
+	return &structuredTextHandler{
+		level:  level,
+		output: output,
+	}
+}
 
-				// Color the level based on severity
-				switch level {
-				case slog.LevelDebug:
-					levelStr = "\033[36mDEBUG\033[0m" // Cyan
-				case slog.LevelInfo:
-					levelStr = "\033[32mINFO\033[0m" // Green
-				case slog.LevelWarn:
-					levelStr = "\033[33mWARN\033[0m" // Yellow
-				case slog.LevelError:
-					levelStr = "\033[31mERROR\033[0m" // Red
-				}
+// structuredTextHandler is a custom handler that formats logs in a more readable way
+type structuredTextHandler struct {
+	level  slog.Level
+	output io.Writer
+	attrs  []slog.Attr
+	groups []string
+}
 
-				return slog.Attr{
-					Key:   a.Key,
-					Value: slog.StringValue(levelStr),
-				}
+func (h *structuredTextHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return level >= h.level
+}
+
+func (h *structuredTextHandler) Handle(ctx context.Context, record slog.Record) error {
+	// Format time
+	timeStr := record.Time.Format("15:04:05")
+
+	// Format level with color
+	var levelStr string
+	switch record.Level {
+	case slog.LevelDebug:
+		levelStr = "\033[36mDEBUG\033[0m" // Cyan
+	case slog.LevelInfo:
+		levelStr = "\033[32mINFO\033[0m" // Green
+	case slog.LevelWarn:
+		levelStr = "\033[33mWARN\033[0m" // Yellow
+	case slog.LevelError:
+		levelStr = "\033[31mERROR\033[0m" // Red
+	default:
+		levelStr = record.Level.String()
+	}
+
+	// Format message
+	message := record.Message
+
+	// Start with the basic log line
+	fmt.Fprintf(h.output, "%s | %s | %s", timeStr, levelStr, message)
+
+	// Add attributes in a structured way
+	if len(h.attrs) > 0 {
+		fmt.Fprint(h.output, " |")
+		for _, attr := range h.attrs {
+			fmt.Fprintf(h.output, " %s=%v", attr.Key, attr.Value.String())
+		}
+	}
+
+	// Add record attributes
+	if record.NumAttrs() > 0 {
+		if len(h.attrs) == 0 {
+			fmt.Fprint(h.output, " |")
+		}
+		record.Attrs(func(attr slog.Attr) bool {
+			// Skip time and level as they're already handled
+			if attr.Key == slog.TimeKey || attr.Key == slog.LevelKey {
+				return true
 			}
-			return a
-		},
-	})
+			fmt.Fprintf(h.output, " %s=%v", attr.Key, attr.Value.String())
+			return true
+		})
+	}
+
+	fmt.Fprintln(h.output)
+	return nil
+}
+
+func (h *structuredTextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	newHandler := &structuredTextHandler{
+		level:  h.level,
+		output: h.output,
+		groups: h.groups,
+	}
+
+	// Combine existing and new attributes
+	newAttrs := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	newAttrs = append(newAttrs, h.attrs...)
+	newAttrs = append(newAttrs, attrs...)
+	newHandler.attrs = newAttrs
+
+	return newHandler
+}
+
+func (h *structuredTextHandler) WithGroup(name string) slog.Handler {
+	newHandler := &structuredTextHandler{
+		level:  h.level,
+		output: h.output,
+		attrs:  h.attrs,
+	}
+
+	// Add the new group to the list
+	newGroups := make([]string, 0, len(h.groups)+1)
+	newGroups = append(newGroups, h.groups...)
+	newGroups = append(newGroups, name)
+	newHandler.groups = newGroups
+
+	return newHandler
 }
 
 // createLogHandlers creates the appropriate log handlers based on configuration
@@ -240,7 +305,7 @@ func createLogHandlers(file *os.File, logLevel slog.Level) slog.Handler {
 		// If debug flag is set, use a multi handler for both console and file
 		if debugFlag {
 			// Create console handler with a more distinguishable format
-			consoleHandler := createColoredTextHandler(os.Stderr, logLevel)
+			consoleHandler := createStructuredTextHandler(os.Stderr, logLevel)
 
 			// Create a multi-handler that sends logs to both console and file
 			return NewMultiHandler(consoleHandler, fileHandler)
@@ -252,7 +317,7 @@ func createLogHandlers(file *os.File, logLevel slog.Level) slog.Handler {
 	// Fall back to console-only logging if file couldn't be opened
 	// Only show logs in console if debug flag is set
 	if debugFlag {
-		return createColoredTextHandler(os.Stderr, logLevel)
+		return createStructuredTextHandler(os.Stderr, logLevel)
 	}
 
 	// Create a null handler that discards all logs when debug is off and file logging failed

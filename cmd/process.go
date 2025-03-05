@@ -18,7 +18,7 @@ import (
 var processCmd = &cobra.Command{
 	Use:   "process [path]",
 	Short: "Process documents for transaction extraction",
-	Long: `Process documents (PDF invoices, receipts, bank statements, CSV files) for transaction extraction.
+	Long: `Process documents (PDF bills, receipts, bank statements, CSV files) for transaction extraction.
 The command will:
 1. Extract text from documents
 2. Identify transactions using AI
@@ -26,7 +26,7 @@ The command will:
 4. Store results in the database
 
 You can provide additional context about the documents using the following flags:
---doc-type: Type of document (e.g., receipt, bank_statement, invoice)
+--doc-type: Type of document (e.g., receipt, bank_statement, bill)
 --transaction-insights: Additional context about the transactions
 --category-insights: Hints for transaction categorization`,
 	Args: cobra.ExactArgs(1),
@@ -36,7 +36,7 @@ You can provide additional context about the documents using the following flags
 func init() {
 	rootCmd.AddCommand(processCmd)
 	processCmd.Flags().Bool("no-ai", false, "Skip AI categorization")
-	processCmd.Flags().String("doc-type", "", "Type of document (e.g., receipt, bank_statement, invoice)")
+	processCmd.Flags().String("doc-type", "", "Type of document (e.g., receipt, bank_statement, bill)")
 	processCmd.Flags().String("transaction-insights", "", "Additional context about the transactions")
 	processCmd.Flags().String("category-insights", "", "Hints for transaction categorization")
 }

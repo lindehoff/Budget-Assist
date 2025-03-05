@@ -329,36 +329,86 @@ func (s *SQLStore) DeleteCategorySubcategory(ctx context.Context, categoryID, su
 
 // CreateTransaction creates a new transaction in the database
 func (s *SQLStore) CreateTransaction(ctx context.Context, transaction *Transaction) error {
+	s.logger.Debug("Creating new transaction",
+		"description", transaction.Description,
+		"amount", transaction.Amount,
+		"date", transaction.Date)
+
 	if err := s.db.WithContext(ctx).Create(transaction).Error; err != nil {
+		s.logger.Error("Failed to create transaction",
+			"error", err,
+			"description", transaction.Description)
 		return fmt.Errorf("failed to create transaction: %w", err)
 	}
+
+	s.logger.Info("Transaction created successfully",
+		"id", transaction.ID,
+		"description", transaction.Description)
 	return nil
 }
 
 // UpdateTransaction updates an existing transaction in the database
 func (s *SQLStore) UpdateTransaction(ctx context.Context, transaction *Transaction) error {
+	s.logger.Debug("Updating transaction",
+		"id", transaction.ID,
+		"description", transaction.Description,
+		"amount", transaction.Amount)
+
 	result := s.db.WithContext(ctx).Save(transaction)
 	if result.Error != nil {
+		s.logger.Error("Failed to update transaction",
+			"error", result.Error,
+			"id", transaction.ID)
 		return fmt.Errorf("failed to update transaction: %w", result.Error)
 	}
+
+	s.logger.Info("Transaction updated successfully",
+		"id", transaction.ID,
+		"description", transaction.Description)
 	return nil
 }
 
 // GetTransactionByID retrieves a transaction by its ID
 func (s *SQLStore) GetTransactionByID(ctx context.Context, id uint) (*Transaction, error) {
+	s.logger.Debug("Retrieving transaction by ID", "id", id)
+
 	var transaction Transaction
 	result := s.db.WithContext(ctx).First(&transaction, id)
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
+			s.logger.Warn("Transaction not found", "id", id)
 			return nil, ErrNotFound
 		}
+		s.logger.Error("Failed to retrieve transaction", "error", result.Error, "id", id)
 		return nil, fmt.Errorf("failed to get transaction: %w", result.Error)
 	}
+
+	s.logger.Debug("Transaction retrieved successfully",
+		"id", transaction.ID,
+		"description", transaction.Description)
 	return &transaction, nil
 }
 
 // ListTransactions retrieves all transactions, optionally filtered by filter
 func (s *SQLStore) ListTransactions(ctx context.Context, filter *TransactionFilter) ([]Transaction, error) {
+	logAttrs := []any{}
+	if filter != nil {
+		if filter.CategoryID != nil {
+			logAttrs = append(logAttrs, "category_id", *filter.CategoryID)
+		}
+		if filter.SubcategoryID != nil {
+			logAttrs = append(logAttrs, "subcategory_id", *filter.SubcategoryID)
+		}
+		if filter.StartDate != nil {
+			logAttrs = append(logAttrs, "start_date", *filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			logAttrs = append(logAttrs, "end_date", *filter.EndDate)
+		}
+	}
+
+	s.logger.Debug("Listing transactions with filters", logAttrs...)
+
 	var transactions []Transaction
 	query := s.db.WithContext(ctx)
 	if filter != nil {
@@ -377,25 +427,60 @@ func (s *SQLStore) ListTransactions(ctx context.Context, filter *TransactionFilt
 	}
 	result := query.Find(&transactions)
 	if result.Error != nil {
+		s.logger.Error("Failed to list transactions", "error", result.Error)
 		return nil, fmt.Errorf("failed to list transactions: %w", result.Error)
 	}
+
+	s.logger.Info("Transactions retrieved successfully", "count", len(transactions))
+	s.logger.Debug("Transaction list details", "transactions", len(transactions), "filters_applied", len(logAttrs) > 0)
 	return transactions, nil
 }
 
 // DeleteTransaction deletes a transaction from the database
 func (s *SQLStore) DeleteTransaction(ctx context.Context, id uint) error {
+	s.logger.Debug("Deleting transaction", "id", id)
+
+	// First, retrieve the transaction to log details
+	tx, err := s.GetTransactionByID(ctx, id)
+	if err != nil {
+		if err == ErrNotFound {
+			s.logger.Warn("Attempted to delete non-existent transaction", "id", id)
+			return nil // Return success if transaction doesn't exist
+		}
+		s.logger.Error("Failed to retrieve transaction for deletion", "error", err, "id", id)
+		return fmt.Errorf("failed to retrieve transaction for deletion: %w", err)
+	}
+
 	result := s.db.WithContext(ctx).Delete(&Transaction{}, id)
 	if result.Error != nil {
+		s.logger.Error("Failed to delete transaction", "error", result.Error, "id", id)
 		return fmt.Errorf("failed to delete transaction: %w", result.Error)
 	}
+
+	s.logger.Info("Transaction deleted successfully",
+		"id", id,
+		"description", tx.Description)
 	return nil
 }
 
 // CreatePrompt creates a new prompt template in the database
 func (s *SQLStore) CreatePrompt(ctx context.Context, prompt *Prompt) error {
+	s.logger.Debug("Creating new prompt template",
+		"type", prompt.Type,
+		"name", prompt.Name,
+		"version", prompt.Version)
+
 	if err := s.db.WithContext(ctx).Create(prompt).Error; err != nil {
+		s.logger.Error("Failed to create prompt template",
+			"error", err,
+			"type", prompt.Type)
 		return fmt.Errorf("failed to create prompt: %w", err)
 	}
+
+	s.logger.Info("Prompt template created successfully",
+		"id", prompt.ID,
+		"type", prompt.Type,
+		"name", prompt.Name)
 	return nil
 }
 

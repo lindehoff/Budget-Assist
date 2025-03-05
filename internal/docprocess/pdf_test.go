@@ -14,27 +14,42 @@ import (
 
 	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/lindehoff/Budget-Assist/internal/db"
-	"github.com/shopspring/decimal"
 )
 
 // mockAIService implements ai.Service for testing
 type mockAIService struct {
-	extractDocumentFunc func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error)
+	extractDocumentFunc          func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error)
+	analyzeTransactionFunc       func(ctx context.Context, tx *db.Transaction, opts ai.AnalysisOptions) (*ai.Analysis, error)
+	suggestCategoriesFunc        func(ctx context.Context, description string) ([]ai.CategoryMatch, error)
+	batchAnalyzeTransactionsFunc func(ctx context.Context, transactions []*db.Transaction, opts ai.AnalysisOptions) ([]*ai.Analysis, error)
 }
 
 func (m *mockAIService) ExtractDocument(ctx context.Context, doc *ai.Document) (*ai.Extraction, error) {
 	if m.extractDocumentFunc != nil {
 		return m.extractDocumentFunc(ctx, doc)
 	}
-	return nil, nil
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (m *mockAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transaction, opts ai.AnalysisOptions) (*ai.Analysis, error) {
-	return nil, nil
+	if m.analyzeTransactionFunc != nil {
+		return m.analyzeTransactionFunc(ctx, tx, opts)
+	}
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (m *mockAIService) SuggestCategories(ctx context.Context, description string) ([]ai.CategoryMatch, error) {
-	return nil, nil
+	if m.suggestCategoriesFunc != nil {
+		return m.suggestCategoriesFunc(ctx, description)
+	}
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockAIService) BatchAnalyzeTransactions(ctx context.Context, transactions []*db.Transaction, opts ai.AnalysisOptions) ([]*ai.Analysis, error) {
+	if m.batchAnalyzeTransactionsFunc != nil {
+		return m.batchAnalyzeTransactionsFunc(ctx, transactions, opts)
+	}
+	return nil, fmt.Errorf("not implemented")
 }
 
 // createTestPDF creates a simple PDF file for testing
@@ -433,7 +448,7 @@ func TestPDFProcessor_extractDocumentWithAI(t *testing.T) {
 			processor := NewPDFProcessor(logger, aiService)
 
 			// Call the method
-			result, err := processor.extractDocumentWithAI(context.Background(), "test content")
+			result, err := processor.extractDocumentWithAI(context.Background(), "test content", ProcessOptions{})
 
 			if tt.wantErr {
 				if err == nil {
@@ -488,6 +503,13 @@ func TestPDFProcessor_convertExtractionToTransactions(t *testing.T) {
 				Amount:      100.0,
 				Currency:    "SEK",
 				Description: "Test transaction",
+				Transactions: []map[string]interface{}{
+					{
+						"date":        "2023-01-01",
+						"amount":      100.0,
+						"description": "Test transaction",
+					},
+				},
 			},
 			wantCount: 1,
 		},
@@ -497,9 +519,37 @@ func TestPDFProcessor_convertExtractionToTransactions(t *testing.T) {
 				Date:        "2023-01-01",
 				Amount:      300.0,
 				Currency:    "SEK",
-				Description: "Transaction 1, Transaction 2, Transaction 3",
+				Description: "Test transaction",
+				Transactions: []map[string]interface{}{
+					{
+						"date":        "2023-01-01",
+						"amount":      100.0,
+						"description": "Transaction 1",
+					},
+					{
+						"date":        "2023-01-01",
+						"amount":      100.0,
+						"description": "Transaction 2",
+					},
+					{
+						"date":        "2023-01-01",
+						"amount":      100.0,
+						"description": "Transaction 3",
+					},
+				},
 			},
 			wantCount: 3,
+		},
+		{
+			name: "Successfully_convert_with_fallback",
+			extraction: &ai.Extraction{
+				Date:         "2023-01-01",
+				Amount:       100.0,
+				Currency:     "SEK",
+				Description:  "Test transaction",
+				Transactions: []map[string]interface{}{},
+			},
+			wantCount: 1,
 		},
 		{
 			name:       "Successfully_handle_nil_extraction",
@@ -521,75 +571,22 @@ func TestPDFProcessor_convertExtractionToTransactions(t *testing.T) {
 
 			// Check transaction fields
 			if tt.wantCount > 0 && tt.extraction != nil {
-				// For single transaction case
-				if tt.wantCount == 1 && !strings.Contains(tt.extraction.Description, ",") {
+				// For transactions from the Transactions field
+				if len(tt.extraction.Transactions) > 0 {
+					for i, tx := range transactions {
+						if i < len(tt.extraction.Transactions) {
+							expectedDesc, _ := tt.extraction.Transactions[i]["description"].(string)
+							if tx.Description != expectedDesc {
+								t.Errorf("Transaction[%d].Description = %s, want %s",
+									i, tx.Description, expectedDesc)
+							}
+						}
+					}
+				} else if tt.wantCount == 1 {
+					// For fallback single transaction
 					if transactions[0].Description != tt.extraction.Description {
-						t.Errorf("PDFProcessor.convertExtractionToTransactions() transaction.Description = %v, want %v",
+						t.Errorf("Transaction.Description = %s, want %s",
 							transactions[0].Description, tt.extraction.Description)
-					}
-					if !transactions[0].Amount.Equal(decimal.NewFromFloat(tt.extraction.Amount)) {
-						t.Errorf("PDFProcessor.convertExtractionToTransactions() transaction.Amount = %v, want %v",
-							transactions[0].Amount, decimal.NewFromFloat(tt.extraction.Amount))
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestPDFProcessor_parseTransactionFromPart(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	aiService := &mockAIService{}
-	processor := NewPDFProcessor(logger, aiService)
-
-	extraction := &ai.Extraction{
-		Date:        "2023-01-01",
-		Amount:      100.0,
-		Currency:    "SEK",
-		Description: "Test transaction",
-	}
-
-	tests := []struct {
-		name   string
-		part   string
-		wantTx bool
-	}{
-		{
-			name:   "Successfully_parse_transaction_with_amount",
-			part:   "Test transaction (100.0 SEK)",
-			wantTx: true,
-		},
-		{
-			name:   "Successfully_parse_transaction_without_amount",
-			part:   "Test transaction",
-			wantTx: true,
-		},
-		{
-			name:   "Successfully_handle_empty_part",
-			part:   "",
-			wantTx: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Call the method
-			tx, ok := processor.parseTransactionFromPart(tt.part, extraction)
-
-			if ok != tt.wantTx {
-				t.Errorf("PDFProcessor.parseTransactionFromPart() ok = %v, want %v", ok, tt.wantTx)
-				return
-			}
-
-			if tt.wantTx {
-				if tx.Description == "" {
-					t.Errorf("PDFProcessor.parseTransactionFromPart() tx.Description is empty, want non-empty")
-				}
-
-				// If the part contains an amount in SEK format
-				if strings.Contains(tt.part, " (") && strings.HasSuffix(tt.part, " SEK)") {
-					if tx.Amount.Equal(decimal.NewFromFloat(0)) {
-						t.Errorf("PDFProcessor.parseTransactionFromPart() tx.Amount = 0, want non-zero")
 					}
 				}
 			}

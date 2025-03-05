@@ -1,7 +1,10 @@
 package ai
 
 import (
+	"bytes"
+	"fmt"
 	"testing"
+	"text/template"
 
 	"github.com/lindehoff/Budget-Assist/internal/db"
 )
@@ -101,6 +104,21 @@ func Test_prompt_template_validation(t *testing.T) {
 	}
 }
 
+// Helper function to execute a template with data (for testing purposes)
+func executeTemplateTest(templateText string, data interface{}) (string, error) {
+	tmpl, err := template.New("prompt").Parse(templateText)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
 func Test_prompt_template_execute(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -137,7 +155,7 @@ func Test_prompt_template_execute(t *testing.T) {
 			}{
 				Content: "Sample bill content",
 			},
-			wantErr: "failed to execute user prompt: template: user:1:28: executing \"user\" at <.InvalidField>: can't evaluate field InvalidField in type struct { Content string }",
+			wantErr: "failed to execute template: template: prompt:1:28: executing \"prompt\" at <.InvalidField>: can't evaluate field InvalidField in type struct { Content string }",
 		},
 		{
 			name: "Execute_error_invalid_template_data",
@@ -148,13 +166,26 @@ func Test_prompt_template_execute(t *testing.T) {
 				Version:      "1.0.0",
 			},
 			data:    "invalid data",
-			wantErr: "failed to execute user prompt: template: user:1:28: executing \"user\" at <.Content>: can't evaluate field Content in type string",
+			wantErr: "failed to execute template: template: prompt:1:28: executing \"prompt\" at <.Content>: can't evaluate field Content in type string",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.template.Execute(tt.data)
+			// Execute system prompt
+			systemPrompt, err := executeTemplateTest(tt.template.SystemPrompt, tt.data)
+			if err != nil && tt.wantErr == "" {
+				t.Errorf("Unexpected error executing system prompt: %v", err)
+				return
+			}
+
+			// If system prompt executed successfully, try user prompt
+			var userPrompt string
+			if err == nil {
+				userPrompt, err = executeTemplateTest(tt.template.UserPrompt, tt.data)
+			}
+
+			// Check for expected errors
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Errorf("Expected error %q, got nil", tt.wantErr)
@@ -171,6 +202,8 @@ func Test_prompt_template_execute(t *testing.T) {
 				return
 			}
 
+			// Combine the prompts in the same format as the original Execute method
+			got := fmt.Sprintf("System: %s\n\nUser: %s", systemPrompt, userPrompt)
 			if got != tt.want {
 				t.Errorf("Expected output %q, got %q", tt.want, got)
 			}

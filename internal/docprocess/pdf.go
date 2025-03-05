@@ -73,6 +73,11 @@ func (p *PDFProcessor) Validate(file io.Reader) error {
 
 // Process processes a PDF file and extracts transactions
 func (p *PDFProcessor) Process(ctx context.Context, file io.Reader, filename string) (*ProcessingResult, error) {
+	return p.ProcessWithOptions(ctx, file, filename, ProcessOptions{})
+}
+
+// ProcessWithOptions processes a PDF document with additional options
+func (p *PDFProcessor) ProcessWithOptions(ctx context.Context, file io.Reader, filename string, opts ProcessOptions) (*ProcessingResult, error) {
 	// Extract text from PDF
 	text, err := p.extractTextFromPDF(ctx, file)
 	if err != nil {
@@ -84,7 +89,7 @@ func (p *PDFProcessor) Process(ctx context.Context, file io.Reader, filename str
 		"text_length", len(text))
 
 	// Extract transactions using AI service
-	extraction, err := p.extractDocumentWithAI(ctx, text)
+	extraction, err := p.extractDocumentWithAI(ctx, text, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -148,15 +153,16 @@ func (p *PDFProcessor) defaultExtractTextFromPDF(ctx context.Context, file io.Re
 	return text, nil
 }
 
-// extractDocumentWithAI uses the AI service to extract information from the document
-func (p *PDFProcessor) extractDocumentWithAI(ctx context.Context, text string) (*ai.Extraction, error) {
+// extractDocumentWithAI extracts document information using AI
+func (p *PDFProcessor) extractDocumentWithAI(ctx context.Context, text string, opts ProcessOptions) (*ai.Extraction, error) {
 	if p.aiService == nil {
 		return nil, fmt.Errorf("AI service is not configured")
 	}
 
 	doc := &ai.Document{
-		Content: []byte(text),
-		Type:    "bill", // Default to bill type
+		Content:         []byte(text),
+		Type:            "bill", // Default to bill type
+		RuntimeInsights: opts.RuntimeInsights,
 	}
 
 	extraction, err := p.aiService.ExtractDocument(ctx, doc)
@@ -174,15 +180,25 @@ func (p *PDFProcessor) convertExtractionToTransactions(extraction *ai.Extraction
 		return transactions
 	}
 
-	// Parse the description to get individual transactions
-	parts := strings.Split(extraction.Description, ", ")
-	for _, part := range parts {
-		// Skip empty parts
-		if part == "" {
-			continue
-		}
+	// If we have transactions from the AI extraction, process them
+	if len(extraction.Transactions) > 0 {
+		p.logger.Debug("Processing transactions from AI extraction",
+			"transactions_count", len(extraction.Transactions))
 
-		tx, ok := p.parseTransactionFromPart(part, extraction)
+		return p.processAITransactions(extraction.Transactions, extraction.Date)
+	}
+
+	// Fallback to the old method if no transactions in the extraction
+	p.logger.Debug("No transactions in AI extraction, using fallback method")
+	return p.processFallbackTransaction(extraction)
+}
+
+// processAITransactions processes transactions from AI extraction
+func (p *PDFProcessor) processAITransactions(txDataList []map[string]interface{}, fallbackDate string) []Transaction {
+	var transactions []Transaction
+
+	for _, txData := range txDataList {
+		tx, ok := p.createTransactionFromMap(txData, fallbackDate)
 		if ok {
 			transactions = append(transactions, tx)
 		}
@@ -191,63 +207,191 @@ func (p *PDFProcessor) convertExtractionToTransactions(extraction *ai.Extraction
 	return transactions
 }
 
-// parseTransactionFromPart parses a transaction from a part of the description
-func (p *PDFProcessor) parseTransactionFromPart(part string, extraction *ai.Extraction) (Transaction, bool) {
-	// Check for empty part
-	if part == "" {
+// createTransactionFromMap creates a transaction from a map of data
+func (p *PDFProcessor) createTransactionFromMap(txData map[string]interface{}, fallbackDate string) (Transaction, bool) {
+	// Extract description
+	description := p.extractDescription(txData)
+	if description == "" {
+		p.logger.Debug("Skipping transaction with empty description")
 		return Transaction{}, false
 	}
 
-	// Extract amount from description (e.g., "Bredband 600/50 (629.00 SEK)")
-	var amount decimal.Decimal
-	var description string
-
-	if strings.Contains(part, " (") && strings.HasSuffix(part, " SEK)") {
-		descParts := strings.Split(part, " (")
-		description = descParts[0]
-		amountStr := strings.TrimSuffix(descParts[1], " SEK)")
-		if amt, err := decimal.NewFromString(amountStr); err == nil {
-			amount = amt
-		} else {
-			amount = decimal.NewFromFloat(extraction.Amount)
-		}
-	} else {
-		description = part
-		amount = decimal.NewFromFloat(extraction.Amount)
+	// Extract amount
+	amount := p.extractAmount(txData, description)
+	if amount.IsZero() {
+		p.logger.Warn("Skipping transaction with zero amount", "description", description)
+		return Transaction{}, false
 	}
 
-	// Parse the date
-	var date time.Time
-	var err error
-	if extraction.Date != "" {
-		date, err = time.Parse("2006-01-02", extraction.Date)
-		if err != nil {
-			p.logger.Error("failed to parse date",
-				"date", extraction.Date,
-				"error", err)
-			return Transaction{}, false
-		}
-	}
-
+	// Extract date
+	date := p.extractDate(txData, fallbackDate, description)
 	if date.IsZero() {
-		p.logger.Warn("skipping transaction due to invalid date",
+		p.logger.Warn("Skipping transaction due to invalid date",
 			"description", description,
 			"amount", amount)
 		return Transaction{}, false
 	}
 
-	// Convert extraction to map for RawData
-	rawData := p.extractionToMap(extraction)
+	// Extract category and subcategory
+	category, subcategory := p.extractCategories(txData)
 
+	// Create transaction
 	return Transaction{
 		Description: description,
 		Amount:      amount,
+		Date:        date,
+		RawData:     txData,
+		Category:    category,
+		SubCategory: subcategory,
+		Source:      "pdf",
+	}, true
+}
+
+// extractDescription extracts the description from transaction data
+func (p *PDFProcessor) extractDescription(txData map[string]interface{}) string {
+	if desc, ok := txData["description"].(string); ok && desc != "" {
+		return desc
+	}
+	if desc, ok := txData["beskrivning"].(string); ok && desc != "" {
+		return desc
+	}
+	return ""
+}
+
+// extractAmount extracts the amount from transaction data
+func (p *PDFProcessor) extractAmount(txData map[string]interface{}, description string) decimal.Decimal {
+	// Try English field name first
+	amount := p.parseAmount(txData, "amount", description)
+
+	// If no amount found, try Swedish field name
+	if amount.IsZero() {
+		amount = p.parseAmount(txData, "belopp", description)
+	}
+
+	return amount
+}
+
+// parseAmount parses an amount from a specific field in the transaction data
+func (p *PDFProcessor) parseAmount(txData map[string]interface{}, fieldName string, description string) decimal.Decimal {
+	switch v := txData[fieldName].(type) {
+	case float64:
+		return decimal.NewFromFloat(v)
+	case int:
+		return decimal.NewFromInt(int64(v))
+	case string:
+		amount, err := decimal.NewFromString(v)
+		if err != nil {
+			p.logger.Warn("Invalid amount in transaction",
+				"description", description,
+				"field", fieldName,
+				"value", v,
+				"error", err)
+			return decimal.Zero
+		}
+		return amount
+	}
+	return decimal.Zero
+}
+
+// extractDate extracts the date from transaction data
+func (p *PDFProcessor) extractDate(txData map[string]interface{}, fallbackDate string, description string) time.Time {
+	// Try English field name first
+	date := p.parseDate(txData, "date", description)
+	if !date.IsZero() {
+		return date
+	}
+
+	// Try Swedish field name
+	date = p.parseDate(txData, "datum", description)
+	if !date.IsZero() {
+		return date
+	}
+
+	// If date is still empty, use the extraction date
+	if fallbackDate != "" {
+		date, err := time.Parse("2006-01-02", fallbackDate)
+		if err != nil {
+			p.logger.Warn("Invalid date format in extraction",
+				"date", fallbackDate,
+				"error", err)
+			return time.Time{}
+		}
+		return date
+	}
+
+	return time.Time{}
+}
+
+// parseDate parses a date from a specific field in the transaction data
+func (p *PDFProcessor) parseDate(txData map[string]interface{}, fieldName string, description string) time.Time {
+	if dateStr, ok := txData[fieldName].(string); ok && dateStr != "" {
+		date, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			p.logger.Warn("Invalid date format in transaction",
+				"description", description,
+				"field", fieldName,
+				"date", dateStr,
+				"error", err)
+			return time.Time{}
+		}
+		return date
+	}
+	return time.Time{}
+}
+
+// extractCategories extracts category and subcategory from transaction data
+func (p *PDFProcessor) extractCategories(txData map[string]interface{}) (string, string) {
+	// Extract category
+	category, _ := txData["category"].(string)
+	if category == "" {
+		category, _ = txData["kategori"].(string)
+	}
+
+	// Extract subcategory
+	subcategory, _ := txData["subcategory"].(string)
+	if subcategory == "" {
+		subcategory, _ = txData["underkategori"].(string)
+	}
+
+	return category, subcategory
+}
+
+// processFallbackTransaction processes a single transaction from extraction data
+func (p *PDFProcessor) processFallbackTransaction(extraction *ai.Extraction) []Transaction {
+	var transactions []Transaction
+
+	// Create a single transaction from the extraction
+	if extraction.Description == "" || extraction.Amount == 0 {
+		return transactions
+	}
+
+	// Parse the date
+	date, err := time.Parse("2006-01-02", extraction.Date)
+	if err != nil {
+		p.logger.Warn("invalid date format in extraction",
+			"date", extraction.Date,
+			"error", err)
+		return transactions
+	}
+
+	if date.IsZero() {
+		return transactions
+	}
+
+	// Convert extraction to map for RawData
+	rawData := p.extractionToMap(extraction)
+
+	transactions = append(transactions, Transaction{
+		Description: extraction.Description,
+		Amount:      decimal.NewFromFloat(extraction.Amount),
 		Date:        date,
 		RawData:     rawData,
 		Category:    extraction.Category,
 		SubCategory: extraction.Subcategory,
 		Source:      "pdf",
-	}, true
+	})
+
+	return transactions
 }
 
 // extractionToMap converts an extraction to a map for RawData

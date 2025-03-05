@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,8 +30,14 @@ func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 func setupMockClient(statusCode int, body interface{}) *http.Client {
 	var responseBody []byte
 
-	// Marshal the body directly, regardless of type
-	responseBody, _ = json.Marshal(body)
+	// Handle string responses directly
+	switch v := body.(type) {
+	case string:
+		responseBody = []byte(v)
+	default:
+		// Marshal other types
+		responseBody, _ = json.Marshal(body)
+	}
 
 	response := &http.Response{
 		StatusCode: statusCode,
@@ -170,25 +175,10 @@ func Test_OpenAIService_ExtractDocument(t *testing.T) {
 		{
 			name: "Successfully_extract_document",
 			document: &Document{
-				Content: []byte("Receipt from Walmart\nDate: 2024-03-20\nAmount: $50.25\nGroceries"),
+				Content: []byte("Receipt from Walmart for $50.25 on March 20, 2024"),
 				Type:    "receipt",
 			},
-			mockResponse: &ChatCompletionResponse{
-				Choices: []Choice{
-					{
-						Message: Message{
-							Content: `{
-								"date": "2024-03-20",
-								"amount": 50.25,
-								"currency": "USD",
-								"description": "Receipt from Walmart",
-								"category": "Groceries",
-								"subcategory": "Supermarket"
-							}`,
-						},
-					},
-				},
-			},
+			mockResponse: `{"choices":[{"message":{"content":"{\"date\": \"2024-03-20\", \"amount\": 50.25, \"currency\": \"USD\", \"description\": \"Receipt from Walmart\", \"category\": \"Groceries\", \"subcategory\": \"Supermarket\"}"}}]}`,
 			expectedResult: &Extraction{
 				Date:        "2024-03-20",
 				Amount:      50.25,
@@ -196,6 +186,16 @@ func Test_OpenAIService_ExtractDocument(t *testing.T) {
 				Description: "Receipt from Walmart",
 				Category:    "Groceries",
 				Subcategory: "Supermarket",
+				Transactions: []map[string]interface{}{
+					{
+						"date":        "2024-03-20",
+						"amount":      50.25,
+						"currency":    "USD",
+						"description": "Receipt from Walmart",
+						"category":    "Groceries",
+						"subcategory": "Supermarket",
+					},
+				},
 			},
 			expectedError: nil,
 		},
@@ -214,17 +214,26 @@ func Test_OpenAIService_ExtractDocument(t *testing.T) {
 			// Create a mock store
 			store := db.NewMockStore()
 
-			// Create a test prompt
-			prompt := &db.Prompt{
-				Type:         db.BillAnalysisPrompt,
-				Name:         "Test Prompt",
-				SystemPrompt: "System prompt",
-				UserPrompt:   "User prompt for {{.Content}}",
-				Version:      "1.0",
-				IsActive:     true,
+			// Create test prompts for all document types
+			promptTypes := []db.PromptType{
+				db.BillAnalysisPrompt,
+				db.ReceiptAnalysisPrompt,
+				db.BankStatementAnalysisPrompt,
+				db.TransactionCategorizationPrompt,
 			}
-			if err := store.CreatePrompt(context.Background(), prompt); err != nil {
-				t.Fatalf("failed to create test prompt: %v", err)
+
+			for _, promptType := range promptTypes {
+				prompt := &db.Prompt{
+					Type:         promptType,
+					Name:         "Test Prompt",
+					SystemPrompt: "System prompt",
+					UserPrompt:   "User prompt for {{.Content}}",
+					Version:      "1.0",
+					IsActive:     true,
+				}
+				if err := store.CreatePrompt(context.Background(), prompt); err != nil {
+					t.Fatalf("failed to create test prompt: %v", err)
+				}
 			}
 
 			// Create the service with mocked HTTP client
@@ -600,113 +609,6 @@ func Test_OpenAIService_extractJSONContent(t *testing.T) {
 			result := service.extractJSONContent(tt.content)
 			if result != tt.expected {
 				t.Errorf("OpenAIService.extractJSONContent() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
-
-func Test_OpenAIService_processTransactionsResponse(t *testing.T) {
-	tests := []struct {
-		name       string
-		content    string
-		docContent []byte
-		expected   *Extraction
-		expectErr  bool
-	}{
-		{
-			name: "Successfully_process_transactions_with_total",
-			content: `[
-				{"beskrivning": "Item 1", "belopp": 100.50},
-				{"beskrivning": "Item 2", "belopp": 200.75},
-				{"beskrivning": "Total", "belopp": 301.25, "metadata": {"date": "2024-03-20"}}
-			]`,
-			docContent: []byte("Test document content"),
-			expected: &Extraction{
-				Currency:    "SEK",
-				Amount:      301.25,
-				Description: "Item 1 (100.50 SEK), Item 2 (200.75 SEK), Total (301.25 SEK)",
-				Content:     "Test document content",
-			},
-			expectErr: false,
-		},
-		{
-			name: "Successfully_process_transactions_without_total",
-			content: `[
-				{"beskrivning": "Item 1", "belopp": 100.50},
-				{"beskrivning": "Item 2", "belopp": 200.75}
-			]`,
-			docContent: []byte("Test document content"),
-			expected: &Extraction{
-				Currency:    "SEK",
-				Amount:      100.50,
-				Description: "Item 1 (100.50 SEK), Item 2 (200.75 SEK)",
-				Content:     "Test document content",
-			},
-			expectErr: false,
-		},
-		{
-			name:       "Successfully_handle_invalid_json",
-			content:    `{invalid json}`,
-			docContent: []byte("Test document content"),
-			expected: &Extraction{
-				Currency: "SEK",
-				Content:  "Test document content",
-			},
-			expectErr: false,
-		},
-		{
-			name:       "ProcessTransactionsResponse_error_empty_transactions",
-			content:    `[]`,
-			docContent: []byte("Test document content"),
-			expectErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create the service
-			service := NewOpenAIService(Config{
-				BaseURL:        "https://api.openai.com",
-				APIKey:         "test-key",
-				RequestTimeout: 30 * time.Second,
-			}, nil, slog.Default())
-
-			// Call the method
-			result, err := service.processTransactionsResponse(tt.content, tt.docContent)
-
-			if tt.expectErr {
-				if err == nil {
-					t.Errorf("OpenAIService.processTransactionsResponse() error = nil, want error")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("OpenAIService.processTransactionsResponse() error = %v, want nil", err)
-					return
-				}
-
-				// For successful case, check the extraction
-				if tt.expected != nil {
-					if result.Currency != tt.expected.Currency {
-						t.Errorf("OpenAIService.processTransactionsResponse() result.Currency = %v, want %v",
-							result.Currency, tt.expected.Currency)
-					}
-					if result.Content != tt.expected.Content {
-						t.Errorf("OpenAIService.processTransactionsResponse() result.Content = %v, want %v",
-							result.Content, tt.expected.Content)
-					}
-
-					// For valid transactions, check the description contains all items
-					if !strings.Contains(tt.content, "invalid") && !strings.Contains(tt.content, "[]") {
-						if !strings.Contains(result.Description, "Item 1") {
-							t.Errorf("OpenAIService.processTransactionsResponse() result.Description = %v, should contain 'Item 1'",
-								result.Description)
-						}
-						if !strings.Contains(result.Description, "Item 2") {
-							t.Errorf("OpenAIService.processTransactionsResponse() result.Description = %v, should contain 'Item 2'",
-								result.Description)
-						}
-					}
-				}
 			}
 		})
 	}

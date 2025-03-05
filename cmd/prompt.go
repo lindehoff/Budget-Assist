@@ -215,7 +215,7 @@ This command allows you to:
 		}
 
 		// Execute the template with the data
-		result, err := template.Execute(templateData)
+		result, err := ai.ExecuteTemplate(template.SystemPrompt, templateData)
 		if err != nil {
 			return &PromptError{
 				Operation: "test",

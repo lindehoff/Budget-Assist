@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,18 +10,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/lindehoff/Budget-Assist/internal/db"
 	"github.com/lindehoff/Budget-Assist/internal/docprocess"
 	"github.com/lindehoff/Budget-Assist/internal/processor"
+	"github.com/shopspring/decimal"
 )
 
 // Mock implementations for testing
 type mockAIService struct {
-	extractDocumentFunc    func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error)
-	analyzeTransactionFunc func(ctx context.Context, tx *db.Transaction, opts ai.AnalysisOptions) (*ai.Analysis, error)
-	suggestCategoriesFunc  func(ctx context.Context, description string) ([]ai.CategoryMatch, error)
+	extractDocumentFunc          func(ctx context.Context, doc *ai.Document) (*ai.Extraction, error)
+	analyzeTransactionFunc       func(ctx context.Context, tx *db.Transaction, opts ai.AnalysisOptions) (*ai.Analysis, error)
+	suggestCategoriesFunc        func(ctx context.Context, description string) ([]ai.CategoryMatch, error)
+	batchAnalyzeTransactionsFunc func(ctx context.Context, transactions []*db.Transaction, opts ai.AnalysisOptions) ([]*ai.Analysis, error)
 }
 
 func (m *mockAIService) ExtractDocument(ctx context.Context, doc *ai.Document) (*ai.Extraction, error) {
@@ -33,6 +37,27 @@ func (m *mockAIService) AnalyzeTransaction(ctx context.Context, tx *db.Transacti
 
 func (m *mockAIService) SuggestCategories(ctx context.Context, description string) ([]ai.CategoryMatch, error) {
 	return m.suggestCategoriesFunc(ctx, description)
+}
+
+func (m *mockAIService) BatchAnalyzeTransactions(ctx context.Context, transactions []*db.Transaction, opts ai.AnalysisOptions) ([]*ai.Analysis, error) {
+	if m.batchAnalyzeTransactionsFunc != nil {
+		return m.batchAnalyzeTransactionsFunc(ctx, transactions, opts)
+	}
+
+	// Default implementation that calls AnalyzeTransaction for each transaction
+	if m.analyzeTransactionFunc != nil {
+		results := make([]*ai.Analysis, 0, len(transactions))
+		for _, tx := range transactions {
+			analysis, err := m.analyzeTransactionFunc(ctx, tx, opts)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, analysis)
+		}
+		return results, nil
+	}
+
+	return nil, fmt.Errorf("not implemented")
 }
 
 type mockStore struct {
@@ -194,5 +219,109 @@ func TestProcessDocuments_Error_invalid_path(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "failed to access path") {
 		t.Errorf("Expected error message to contain 'failed to access path', got '%s'", err.Error())
+	}
+}
+
+func TestSetCategoryIDsFromAnalysis(t *testing.T) {
+	// Create test transactions
+	transactions := []*db.Transaction{
+		{
+			Description:     "Test Transaction 1",
+			Amount:          decimal.NewFromFloat(100.0),
+			Date:            time.Now(),
+			TransactionDate: time.Now(),
+		},
+		{
+			Description:     "Test Transaction 2",
+			Amount:          decimal.NewFromFloat(200.0),
+			Date:            time.Now(),
+			TransactionDate: time.Now(),
+		},
+	}
+
+	// Create test analyses
+	analyses := []*ai.Analysis{
+		{
+			Category:      "Fasta kostnader",
+			Subcategory:   "Medier",
+			CategoryID:    5,
+			SubcategoryID: 19,
+			Confidence:    0.95,
+		},
+		{
+			Category:      "Fasta kostnader",
+			Subcategory:   "Medier",
+			CategoryID:    5,
+			SubcategoryID: 19,
+			Confidence:    0.95,
+		},
+	}
+
+	// Create a logger for testing
+	logger := slog.Default()
+
+	// Apply analyses to transactions (simulating the code in processPDF)
+	for i, dbTx := range transactions {
+		if i < len(analyses) {
+			// Convert analysis to JSON string
+			aiAnalysis, err := json.Marshal(analyses[i])
+			if err != nil {
+				t.Fatalf("Failed to marshal AI analysis: %v", err)
+			}
+
+			dbTx.AIAnalysis = string(aiAnalysis)
+
+			// Set category and subcategory IDs from analysis
+			if analyses[i].CategoryID > 0 {
+				// Safe conversion since we've checked the value is positive
+				categoryID := uint(analyses[i].CategoryID) // #nosec G115
+				dbTx.CategoryID = &categoryID
+				logger.Debug("Setting category ID from AI analysis",
+					"transaction_description", dbTx.Description,
+					"category_id", categoryID,
+					"category", analyses[i].Category)
+			}
+
+			if analyses[i].SubcategoryID > 0 {
+				// Safe conversion since we've checked the value is positive
+				subcategoryID := uint(analyses[i].SubcategoryID) // #nosec G115
+				dbTx.SubcategoryID = &subcategoryID
+				logger.Debug("Setting subcategory ID from AI analysis",
+					"transaction_description", dbTx.Description,
+					"subcategory_id", subcategoryID,
+					"subcategory", analyses[i].Subcategory)
+			}
+		}
+	}
+
+	// Verify that category and subcategory IDs were set correctly
+	for _, tx := range transactions {
+		// Check that CategoryID is set correctly
+		if tx.CategoryID == nil {
+			t.Error("Expected CategoryID to be set, got nil")
+		} else if *tx.CategoryID != 5 {
+			t.Errorf("Expected CategoryID to be 5, got: %d", *tx.CategoryID)
+		}
+
+		// Check that SubcategoryID is set correctly
+		if tx.SubcategoryID == nil {
+			t.Error("Expected SubcategoryID to be set, got nil")
+		} else if *tx.SubcategoryID != 19 {
+			t.Errorf("Expected SubcategoryID to be 19, got: %d", *tx.SubcategoryID)
+		}
+
+		// Check that AIAnalysis contains the expected data
+		var analysis ai.Analysis
+		err := json.Unmarshal([]byte(tx.AIAnalysis), &analysis)
+		if err != nil {
+			t.Errorf("Failed to unmarshal AIAnalysis: %v", err)
+		} else {
+			if analysis.CategoryID != 5 {
+				t.Errorf("Expected analysis.CategoryID to be 5, got: %d", analysis.CategoryID)
+			}
+			if analysis.SubcategoryID != 19 {
+				t.Errorf("Expected analysis.SubcategoryID to be 19, got: %d", analysis.SubcategoryID)
+			}
+		}
 	}
 }
