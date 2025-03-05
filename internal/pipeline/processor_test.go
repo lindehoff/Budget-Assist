@@ -226,14 +226,16 @@ func TestSetCategoryIDsFromAnalysis(t *testing.T) {
 	// Create test transactions
 	transactions := []*db.Transaction{
 		{
-			Description: "Test Transaction 1",
-			Amount:      decimal.NewFromFloat(100.0),
-			Date:        time.Now(),
+			Description:     "Test Transaction 1",
+			Amount:          decimal.NewFromFloat(100.0),
+			Date:            time.Now(),
+			TransactionDate: time.Now(),
 		},
 		{
-			Description: "Test Transaction 2",
-			Amount:      decimal.NewFromFloat(200.0),
-			Date:        time.Now(),
+			Description:     "Test Transaction 2",
+			Amount:          decimal.NewFromFloat(200.0),
+			Date:            time.Now(),
+			TransactionDate: time.Now(),
 		},
 	}
 

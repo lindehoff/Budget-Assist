@@ -65,9 +65,9 @@ type CategorySubcategory struct {
 
 // Transaction represents a financial transaction
 type Transaction struct {
-	ID              uint `gorm:"primarykey"`
-	Date            time.Time
-	TransactionDate time.Time
+	ID              uint      `gorm:"primarykey"`
+	Date            time.Time // When the transaction was imported into the system
+	TransactionDate time.Time // When the actual financial transaction occurred
 	Amount          decimal.Decimal
 	Description     string
 	CategoryID      *uint

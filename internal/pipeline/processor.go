@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lindehoff/Budget-Assist/internal/ai"
 	"github.com/lindehoff/Budget-Assist/internal/db"
@@ -117,12 +119,47 @@ func (p *Pipeline) processFile(ctx context.Context, path string, opts ProcessOpt
 		return ProcessingResult{FilePath: path}, err
 	}
 
+	// Log transaction details before storing
+	p.logger.Info("Extracted transactions summary:", "count", len(transactions))
+	for i, tx := range transactions {
+		// Get category and subcategory names
+		var categoryName, subcategoryName string
+		if tx.CategoryID != nil {
+			category, err := p.store.GetCategoryByID(ctx, *tx.CategoryID)
+			if err == nil && category != nil {
+				categoryName = category.Name
+			}
+		}
+		if tx.SubcategoryID != nil {
+			subcategory, err := p.store.GetSubcategoryByID(ctx, *tx.SubcategoryID)
+			if err == nil && subcategory != nil {
+				subcategoryName = subcategory.Name
+			}
+		}
+
+		p.logger.Info(fmt.Sprintf("Transaction #%d:", i+1),
+			"description", tx.Description,
+			"amount", tx.Amount,
+			"date", tx.Date.Format("2006-01-02"),
+			"category", categoryName,
+			"subcategory", subcategoryName,
+			"category_id", tx.CategoryID,
+			"subcategory_id", tx.SubcategoryID)
+	}
+
 	// Store transactions in database
 	for _, tx := range transactions {
 		if err := p.store.CreateTransaction(ctx, &tx); err != nil {
 			p.logger.Error("failed to store transaction", "error", err)
 			continue
 		}
+
+		// Log successful creation with ID
+		p.logger.Info("Transaction created successfully",
+			"id", tx.ID,
+			"description", tx.Description,
+			"amount", tx.Amount,
+			"date", tx.Date.Format("2006-01-02"))
 	}
 
 	return ProcessingResult{
@@ -165,10 +202,14 @@ func (p *Pipeline) processPDF(ctx context.Context, path string, opts ProcessOpti
 		dbTx := &db.Transaction{
 			Description:     tx.Description,
 			Amount:          tx.Amount,
-			TransactionDate: tx.Date,
+			Date:            time.Now(), // Set to current time (import time)
+			TransactionDate: tx.Date,    // Keep the actual transaction date
 			RawData:         string(rawData),
 			Currency:        db.CurrencySEK, // Default to SEK
 		}
+
+		// Extract category IDs from raw data if available
+		p.setCategoryIDsFromRawData(dbTx)
 
 		dbTransactions = append(dbTransactions, dbTx)
 	}
@@ -238,6 +279,81 @@ func (p *Pipeline) processPDF(ctx context.Context, path string, opts ProcessOpti
 	return transactions, nil
 }
 
+// setCategoryIDsFromRawData extracts category and subcategory IDs from raw data
+func (p *Pipeline) setCategoryIDsFromRawData(tx *db.Transaction) {
+	if tx.RawData == "" {
+		return
+	}
+
+	var rawData map[string]interface{}
+	if err := json.Unmarshal([]byte(tx.RawData), &rawData); err != nil {
+		p.logger.Error("failed to unmarshal raw data", "error", err)
+		return
+	}
+
+	// Extract category_id
+	if categoryIDVal, ok := rawData["category_id"]; ok {
+		var categoryID uint
+		switch v := categoryIDVal.(type) {
+		case float64:
+			if v > 0 {
+				categoryID = uint(v)
+				tx.CategoryID = &categoryID
+				p.logger.Debug("Setting category ID from raw data",
+					"transaction_description", tx.Description,
+					"category_id", categoryID)
+			}
+		case int:
+			if v > 0 {
+				categoryID = uint(v)
+				tx.CategoryID = &categoryID
+				p.logger.Debug("Setting category ID from raw data",
+					"transaction_description", tx.Description,
+					"category_id", categoryID)
+			}
+		case string:
+			if id, err := strconv.ParseUint(v, 10, 32); err == nil && id > 0 {
+				categoryID = uint(id)
+				tx.CategoryID = &categoryID
+				p.logger.Debug("Setting category ID from raw data",
+					"transaction_description", tx.Description,
+					"category_id", categoryID)
+			}
+		}
+	}
+
+	// Extract subcategory_id
+	if subcategoryIDVal, ok := rawData["subcategory_id"]; ok {
+		var subcategoryID uint
+		switch v := subcategoryIDVal.(type) {
+		case float64:
+			if v > 0 {
+				subcategoryID = uint(v)
+				tx.SubcategoryID = &subcategoryID
+				p.logger.Debug("Setting subcategory ID from raw data",
+					"transaction_description", tx.Description,
+					"subcategory_id", subcategoryID)
+			}
+		case int:
+			if v > 0 {
+				subcategoryID = uint(v)
+				tx.SubcategoryID = &subcategoryID
+				p.logger.Debug("Setting subcategory ID from raw data",
+					"transaction_description", tx.Description,
+					"subcategory_id", subcategoryID)
+			}
+		case string:
+			if id, err := strconv.ParseUint(v, 10, 32); err == nil && id > 0 {
+				subcategoryID = uint(id)
+				tx.SubcategoryID = &subcategoryID
+				p.logger.Debug("Setting subcategory ID from raw data",
+					"transaction_description", tx.Description,
+					"subcategory_id", subcategoryID)
+			}
+		}
+	}
+}
+
 // processCSV handles CSV document processing
 func (p *Pipeline) processCSV(ctx context.Context, path string, opts ProcessOptions) ([]db.Transaction, error) {
 	// Process CSV using SEB processor
@@ -265,10 +381,14 @@ func (p *Pipeline) processCSV(ctx context.Context, path string, opts ProcessOpti
 		dbTx := db.Transaction{
 			Description:     tx.Description,
 			Amount:          tx.Amount,
-			TransactionDate: tx.Date,
+			Date:            time.Now(), // Set to current time (import time)
+			TransactionDate: tx.Date,    // Keep the actual transaction date
 			RawData:         string(rawData),
 			Currency:        db.CurrencySEK, // Default to SEK
 		}
+
+		// Extract category IDs from raw data if available
+		p.setCategoryIDsFromRawData(&dbTx)
 
 		// Only analyze with AI if service is available
 		if p.aiService != nil {

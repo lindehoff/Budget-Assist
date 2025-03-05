@@ -1102,7 +1102,7 @@ func (s *OpenAIService) processBatchAnalysisResponse(content string, transaction
 
 	// Process the content to extract JSON
 	processedContent := s.extractJSONContent(content)
-	logger.Debug("Extracted JSON content", "content_length", len(processedContent))
+	logger.Debug("Extracted JSON content", "content_length", len(processedContent), "content", processedContent)
 
 	// Try to parse as an array of analyses
 	var analysisArray []map[string]interface{}
@@ -1110,6 +1110,13 @@ func (s *OpenAIService) processBatchAnalysisResponse(content string, transaction
 	if err != nil {
 		logger.Error("Failed to parse batch analysis response as array", "error", err, "content", processedContent)
 		return nil, fmt.Errorf("failed to parse batch analysis response: %w", err)
+	}
+
+	// If we got an empty array, log a warning and return empty results
+	if len(analysisArray) == 0 {
+		logger.Warn("Received empty analysis array from AI service",
+			"transaction_count", len(transactions))
+		return []*Analysis{}, nil
 	}
 
 	// Ensure we have the right number of analyses
@@ -1196,6 +1203,16 @@ func (s *OpenAIService) processBatchAnalysisResponse(content string, transaction
 			"category_id", categoryID,
 			"subcategory_id", subcategoryID,
 			"confidence", confidence)
+	}
+
+	// If we didn't get any results but have transactions, create empty analyses
+	if len(results) == 0 && len(transactions) > 0 {
+		logger.Warn("No valid analyses found, creating empty analyses",
+			"transaction_count", len(transactions))
+
+		for range transactions {
+			results = append(results, &Analysis{})
+		}
 	}
 
 	return results, nil
