@@ -82,3 +82,8 @@ type ProcessorFactory interface {
 	// SupportedTypes returns a list of supported document types
 	SupportedTypes() []DocumentType
 }
+
+// ProcessOptions contains options for document processing
+type ProcessOptions struct {
+	RuntimeInsights string
+}

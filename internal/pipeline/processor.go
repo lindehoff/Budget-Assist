@@ -140,14 +140,19 @@ func (p *Pipeline) processPDF(ctx context.Context, path string, opts ProcessOpti
 	}
 	defer file.Close()
 
-	// Process PDF document
-	result, err := p.docProcessor.Process(ctx, file, filepath.Base(path))
+	// Process PDF document with options
+	docOpts := docprocess.ProcessOptions{
+		RuntimeInsights: opts.TransactionInsights,
+	}
+	result, err := p.docProcessor.ProcessWithOptions(ctx, file, filepath.Base(path), docOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process PDF: %w", err)
 	}
 
 	// Convert to database transactions
+	dbTransactions := make([]*db.Transaction, 0, len(result.Transactions))
 	transactions := make([]db.Transaction, 0, len(result.Transactions))
+
 	for _, tx := range result.Transactions {
 		// Convert raw data to JSON string
 		rawData, err := json.Marshal(tx.RawData)
@@ -157,7 +162,7 @@ func (p *Pipeline) processPDF(ctx context.Context, path string, opts ProcessOpti
 		}
 
 		// Create transaction record with insights
-		dbTx := db.Transaction{
+		dbTx := &db.Transaction{
 			Description:     tx.Description,
 			Amount:          tx.Amount,
 			TransactionDate: tx.Date,
@@ -165,25 +170,69 @@ func (p *Pipeline) processPDF(ctx context.Context, path string, opts ProcessOpti
 			Currency:        db.CurrencySEK, // Default to SEK
 		}
 
-		// Analyze transaction for categorization with insights
-		analysis, err := p.aiService.AnalyzeTransaction(ctx, &dbTx, ai.AnalysisOptions{
-			DocumentType:    opts.DocumentType,
-			RuntimeInsights: opts.TransactionInsights + "\n" + opts.CategoryInsights,
-		})
-		if err != nil {
-			p.logger.Error("failed to analyze transaction", "error", err)
-			continue
+		dbTransactions = append(dbTransactions, dbTx)
+	}
+
+	// Skip analysis if no transactions found
+	if len(dbTransactions) == 0 {
+		p.logger.Warn("No transactions found in document", "path", path)
+		return transactions, nil
+	}
+
+	// Analyze all transactions at once for categorization
+	p.logger.Info("Analyzing transactions for categorization",
+		"transaction_count", len(dbTransactions),
+		"document_type", opts.DocumentType)
+
+	analyses, err := p.aiService.BatchAnalyzeTransactions(ctx, dbTransactions, ai.AnalysisOptions{
+		DocumentType:    opts.DocumentType,
+		RuntimeInsights: opts.TransactionInsights + "\n" + opts.CategoryInsights,
+	})
+
+	if err != nil {
+		p.logger.Error("failed to analyze transactions", "error", err)
+		// Continue without categories
+		for _, dbTx := range dbTransactions {
+			transactions = append(transactions, *dbTx)
+		}
+		return transactions, nil
+	}
+
+	// Apply analyses to transactions
+	for i, dbTx := range dbTransactions {
+		if i < len(analyses) {
+			// Convert analysis to JSON string
+			aiAnalysis, err := json.Marshal(analyses[i])
+			if err != nil {
+				p.logger.Error("failed to marshal AI analysis", "error", err)
+				continue
+			}
+
+			dbTx.AIAnalysis = string(aiAnalysis)
+
+			// Set category and subcategory IDs from analysis
+			if analyses[i].CategoryID > 0 {
+				// Safe conversion since we've checked the value is positive
+				categoryID := uint(analyses[i].CategoryID) // #nosec G115
+				dbTx.CategoryID = &categoryID
+				p.logger.Debug("Setting category ID from AI analysis",
+					"transaction_description", dbTx.Description,
+					"category_id", categoryID,
+					"category", analyses[i].Category)
+			}
+
+			if analyses[i].SubcategoryID > 0 {
+				// Safe conversion since we've checked the value is positive
+				subcategoryID := uint(analyses[i].SubcategoryID) // #nosec G115
+				dbTx.SubcategoryID = &subcategoryID
+				p.logger.Debug("Setting subcategory ID from AI analysis",
+					"transaction_description", dbTx.Description,
+					"subcategory_id", subcategoryID,
+					"subcategory", analyses[i].Subcategory)
+			}
 		}
 
-		// Convert analysis to JSON string
-		aiAnalysis, err := json.Marshal(analysis)
-		if err != nil {
-			p.logger.Error("failed to marshal AI analysis", "error", err)
-			continue
-		}
-
-		dbTx.AIAnalysis = string(aiAnalysis)
-		transactions = append(transactions, dbTx)
+		transactions = append(transactions, *dbTx)
 	}
 
 	return transactions, nil
@@ -236,6 +285,27 @@ func (p *Pipeline) processCSV(ctx context.Context, path string, opts ProcessOpti
 					p.logger.Error("failed to marshal AI analysis", "error", err)
 				} else {
 					dbTx.AIAnalysis = string(aiAnalysis)
+
+					// Set category and subcategory IDs from analysis
+					if analysis.CategoryID > 0 {
+						// Safe conversion since we've checked the value is positive
+						categoryID := uint(analysis.CategoryID)
+						dbTx.CategoryID = &categoryID
+						p.logger.Debug("Setting category ID from AI analysis",
+							"transaction_description", dbTx.Description,
+							"category_id", categoryID,
+							"category", analysis.Category)
+					}
+
+					if analysis.SubcategoryID > 0 {
+						// Safe conversion since we've checked the value is positive
+						subcategoryID := uint(analysis.SubcategoryID)
+						dbTx.SubcategoryID = &subcategoryID
+						p.logger.Debug("Setting subcategory ID from AI analysis",
+							"transaction_description", dbTx.Description,
+							"subcategory_id", subcategoryID,
+							"subcategory", analysis.Subcategory)
+					}
 				}
 			}
 		}

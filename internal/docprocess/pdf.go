@@ -73,6 +73,11 @@ func (p *PDFProcessor) Validate(file io.Reader) error {
 
 // Process processes a PDF file and extracts transactions
 func (p *PDFProcessor) Process(ctx context.Context, file io.Reader, filename string) (*ProcessingResult, error) {
+	return p.ProcessWithOptions(ctx, file, filename, ProcessOptions{})
+}
+
+// ProcessWithOptions processes a PDF document with additional options
+func (p *PDFProcessor) ProcessWithOptions(ctx context.Context, file io.Reader, filename string, opts ProcessOptions) (*ProcessingResult, error) {
 	// Extract text from PDF
 	text, err := p.extractTextFromPDF(ctx, file)
 	if err != nil {
@@ -84,7 +89,7 @@ func (p *PDFProcessor) Process(ctx context.Context, file io.Reader, filename str
 		"text_length", len(text))
 
 	// Extract transactions using AI service
-	extraction, err := p.extractDocumentWithAI(ctx, text)
+	extraction, err := p.extractDocumentWithAI(ctx, text, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -148,15 +153,16 @@ func (p *PDFProcessor) defaultExtractTextFromPDF(ctx context.Context, file io.Re
 	return text, nil
 }
 
-// extractDocumentWithAI uses the AI service to extract information from the document
-func (p *PDFProcessor) extractDocumentWithAI(ctx context.Context, text string) (*ai.Extraction, error) {
+// extractDocumentWithAI extracts document information using AI
+func (p *PDFProcessor) extractDocumentWithAI(ctx context.Context, text string, opts ProcessOptions) (*ai.Extraction, error) {
 	if p.aiService == nil {
 		return nil, fmt.Errorf("AI service is not configured")
 	}
 
 	doc := &ai.Document{
-		Content: []byte(text),
-		Type:    "bill", // Default to bill type
+		Content:         []byte(text),
+		Type:            "bill", // Default to bill type
+		RuntimeInsights: opts.RuntimeInsights,
 	}
 
 	extraction, err := p.aiService.ExtractDocument(ctx, doc)
@@ -174,80 +180,165 @@ func (p *PDFProcessor) convertExtractionToTransactions(extraction *ai.Extraction
 		return transactions
 	}
 
-	// Parse the description to get individual transactions
-	parts := strings.Split(extraction.Description, ", ")
-	for _, part := range parts {
-		// Skip empty parts
-		if part == "" {
-			continue
+	// If we have transactions from the AI extraction, process them
+	if len(extraction.Transactions) > 0 {
+		p.logger.Debug("Processing transactions from AI extraction",
+			"transactions_count", len(extraction.Transactions))
+
+		for _, txData := range extraction.Transactions {
+			// Extract basic fields
+			var description string
+			if desc, ok := txData["description"].(string); ok {
+				description = desc
+			} else if desc, ok := txData["beskrivning"].(string); ok {
+				description = desc
+			}
+
+			if description == "" {
+				p.logger.Debug("Skipping transaction with empty description")
+				continue
+			}
+
+			// Extract amount
+			var amount decimal.Decimal
+			switch v := txData["amount"].(type) {
+			case float64:
+				amount = decimal.NewFromFloat(v)
+			case int:
+				amount = decimal.NewFromInt(int64(v))
+			case string:
+				var err error
+				amount, err = decimal.NewFromString(v)
+				if err != nil {
+					p.logger.Warn("Invalid amount in transaction",
+						"description", description,
+						"amount", v,
+						"error", err)
+					continue
+				}
+			}
+
+			// If no amount found, try Swedish field name
+			if amount.IsZero() {
+				switch v := txData["belopp"].(type) {
+				case float64:
+					amount = decimal.NewFromFloat(v)
+				case int:
+					amount = decimal.NewFromInt(int64(v))
+				case string:
+					var err error
+					amount, err = decimal.NewFromString(v)
+					if err != nil {
+						p.logger.Warn("Invalid amount in transaction",
+							"description", description,
+							"amount", v,
+							"error", err)
+						continue
+					}
+				}
+			}
+
+			// Extract date
+			var date time.Time
+			if dateStr, ok := txData["date"].(string); ok && dateStr != "" {
+				var err error
+				date, err = time.Parse("2006-01-02", dateStr)
+				if err != nil {
+					p.logger.Warn("Invalid date format in transaction",
+						"description", description,
+						"date", dateStr,
+						"error", err)
+				}
+			} else if dateStr, ok := txData["datum"].(string); ok && dateStr != "" {
+				var err error
+				date, err = time.Parse("2006-01-02", dateStr)
+				if err != nil {
+					p.logger.Warn("Invalid date format in transaction",
+						"description", description,
+						"date", dateStr,
+						"error", err)
+				}
+			}
+
+			// If date is still empty, use the extraction date
+			if date.IsZero() && extraction.Date != "" {
+				var err error
+				date, err = time.Parse("2006-01-02", extraction.Date)
+				if err != nil {
+					p.logger.Warn("Invalid date format in extraction",
+						"date", extraction.Date,
+						"error", err)
+				}
+			}
+
+			// Skip transactions with invalid date
+			if date.IsZero() {
+				p.logger.Warn("Skipping transaction due to invalid date",
+					"description", description,
+					"amount", amount)
+				continue
+			}
+
+			// Extract category and subcategory
+			category, _ := txData["category"].(string)
+			if category == "" {
+				category, _ = txData["kategori"].(string)
+			}
+
+			subcategory, _ := txData["subcategory"].(string)
+			if subcategory == "" {
+				subcategory, _ = txData["underkategori"].(string)
+			}
+
+			// Create transaction
+			transactions = append(transactions, Transaction{
+				Description: description,
+				Amount:      amount,
+				Date:        date,
+				RawData:     txData,
+				Category:    category,
+				SubCategory: subcategory,
+				Source:      "pdf",
+			})
 		}
 
-		tx, ok := p.parseTransactionFromPart(part, extraction)
-		if ok {
-			transactions = append(transactions, tx)
+		return transactions
+	}
+
+	// Fallback to the old method if no transactions in the extraction
+	p.logger.Debug("No transactions in AI extraction, using fallback method")
+
+	// Create a single transaction from the extraction
+	if extraction.Description != "" && extraction.Amount != 0 {
+		// Parse the date
+		var date time.Time
+		var err error
+		if extraction.Date != "" {
+			date, err = time.Parse("2006-01-02", extraction.Date)
+			if err != nil {
+				p.logger.Warn("invalid date format in extraction",
+					"date", extraction.Date,
+					"error", err)
+			}
+		}
+
+		if !date.IsZero() {
+			// Convert extraction to map for RawData
+			rawData := p.extractionToMap(extraction)
+
+			transactions = append(transactions, Transaction{
+				Description: extraction.Description,
+				Amount:      decimal.NewFromFloat(extraction.Amount),
+				Date:        date,
+				RawData:     rawData,
+				Category:    extraction.Category,
+				SubCategory: extraction.Subcategory,
+				Source:      "pdf",
+			})
 		}
 	}
 
 	return transactions
-}
-
-// parseTransactionFromPart parses a transaction from a part of the description
-func (p *PDFProcessor) parseTransactionFromPart(part string, extraction *ai.Extraction) (Transaction, bool) {
-	// Check for empty part
-	if part == "" {
-		return Transaction{}, false
-	}
-
-	// Extract amount from description (e.g., "Bredband 600/50 (629.00 SEK)")
-	var amount decimal.Decimal
-	var description string
-
-	if strings.Contains(part, " (") && strings.HasSuffix(part, " SEK)") {
-		descParts := strings.Split(part, " (")
-		description = descParts[0]
-		amountStr := strings.TrimSuffix(descParts[1], " SEK)")
-		if amt, err := decimal.NewFromString(amountStr); err == nil {
-			amount = amt
-		} else {
-			amount = decimal.NewFromFloat(extraction.Amount)
-		}
-	} else {
-		description = part
-		amount = decimal.NewFromFloat(extraction.Amount)
-	}
-
-	// Parse the date
-	var date time.Time
-	var err error
-	if extraction.Date != "" {
-		date, err = time.Parse("2006-01-02", extraction.Date)
-		if err != nil {
-			p.logger.Error("failed to parse date",
-				"date", extraction.Date,
-				"error", err)
-			return Transaction{}, false
-		}
-	}
-
-	if date.IsZero() {
-		p.logger.Warn("skipping transaction due to invalid date",
-			"description", description,
-			"amount", amount)
-		return Transaction{}, false
-	}
-
-	// Convert extraction to map for RawData
-	rawData := p.extractionToMap(extraction)
-
-	return Transaction{
-		Description: description,
-		Amount:      amount,
-		Date:        date,
-		RawData:     rawData,
-		Category:    extraction.Category,
-		SubCategory: extraction.Subcategory,
-		Source:      "pdf",
-	}, true
 }
 
 // extractionToMap converts an extraction to a map for RawData
